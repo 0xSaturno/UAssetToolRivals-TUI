@@ -122,7 +122,7 @@ func zenForm(choice int) *commandForm {
 			{label: "Paks Directory", configKey: "GamePaksDir"},
 			{label: "Output Directory", configKey: "OutputExtractionDir"},
 			{label: "Mod Container Path(s)", optional: true},
-			{label: "Filter Patterns (space sep)", optional: true},
+			{label: "Filter Patterns (space sep or .txt file)", optional: true},
 			{label: "AES Key", configKey: "AesKey", optional: true},
 			{label: "Extract dependencies?", boolToggle: true, optional: true, defaultVal: "N"},
 		}}
@@ -134,7 +134,7 @@ func zenForm(choice int) *commandForm {
 		return &commandForm{command: "list_iostore", fields: []formField{
 			{label: "UTOC Path or Directory"},
 			{label: "AES Key", configKey: "AesKey", optional: true},
-			{label: "Filter Pattern", optional: true},
+			{label: "Filter Pattern (single)", optional: true},
 		}}
 	case 7:
 		return &commandForm{command: "dump_zen_from_game", fields: []formField{
