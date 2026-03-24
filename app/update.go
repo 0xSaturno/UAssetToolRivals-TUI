@@ -1031,7 +1031,7 @@ func (m model) buildArgs() string {
 				if i == 3 && strings.EqualFold(val, "y") {
 					parts = append(parts, "--list")
 				}
-			case "inject_texture":
+			case "inject_texture", "batch_inject_texture":
 				if i == 4 && strings.EqualFold(val, "y") {
 					parts = append(parts, "--no-mips")
 				}
@@ -1048,7 +1048,7 @@ func (m model) buildArgs() string {
 				parts = append(parts, quotePathArg(val))
 				continue
 			}
-		case "inject_texture":
+		case "inject_texture", "batch_inject_texture":
 			if i == 3 {
 				parts = append(parts, "--format", val)
 				continue

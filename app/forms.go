@@ -70,6 +70,15 @@ func assetForm(choice int) *commandForm {
 			{label: "Mappings Path (.usmap)", configKey: "UsmapPath", optional: true},
 		}}
 	case 6:
+		return &commandForm{command: "batch_inject_texture", fields: []formField{
+			{label: "UAsset Directory"},
+			{label: "Image Directory"},
+			{label: "Output Directory"},
+			{label: "Compression Format (BC7/BC3/BC1/BC5/BC4/BGRA8)", optional: true},
+			{label: "Disable Mipmaps?", boolToggle: true, optional: true},
+			{label: "Mappings Path (.usmap)", configKey: "UsmapPath", optional: true},
+		}}
+	case 7:
 		return &commandForm{command: "extract_texture", fields: []formField{
 			{label: "Texture UAsset (.uasset)"},
 			{label: "Output Image Path"},

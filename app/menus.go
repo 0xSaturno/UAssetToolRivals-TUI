@@ -68,6 +68,7 @@ var assetOpsMenu = menuDef{
 		{"Dump Info", "•", accentCyan, "Print detailed metadata and structure information"},
 		{"Skeletal Mesh Info", "•", accentCyan, "Show skeletal mesh sections, LODs, and related data"},
 		{"Inject Texture", "•", accentCyan, "Inject an image into a Texture2D asset"},
+		{"Batch Inject Textures", "•", accentCyan, "Inject matching replacement images into Texture2D assets in bulk"},
 		{"Extract Texture", "•", accentCyan, "Extract a Texture2D asset to an image file"},
 		{"← Back", " ", dimStyle, ""},
 	},
