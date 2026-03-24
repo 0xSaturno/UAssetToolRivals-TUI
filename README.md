@@ -1,6 +1,6 @@
 # UAssetTool TUI
 
-A terminal UI wrapper for [UAssetToolRivals](https://github.com/XzantGaming/UAssetToolRivals), built in Go with Bubble Tea. It provides a keyboard-and-mouse driven interface for browsing commands, filling in arguments, previewing the generated CLI, streaming live output, and managing persistent settings without memorizing raw command syntax.
+A terminal UI wrapper for [UAssetToolRivals](https://github.com/XzantGaming/UAssetToolRivals), built in Go with Bubble Tea for Windows and Linux. It provides a keyboard-and-mouse driven interface for browsing commands, filling in arguments, previewing the generated CLI, streaming live output, and managing persistent settings without memorizing raw command syntax.
 
 ## Features
 
@@ -9,98 +9,18 @@ A terminal UI wrapper for [UAssetToolRivals](https://github.com/XzantGaming/UAss
 - **Persistent settings**: Stores defaults like `GamePaksDir`, `UsmapPath`, `AesKey`, and `OutputExtractionDir` in `config.json` next to the executable.
 - **Command preview**: Lets you review the generated UAssetTool CLI command before running it.
 - **Live output streaming**: Shows UAT stdout/stderr live while the command is running.
-- **Scrollable output panes**: Running logs and result views support keyboard scrolling, mouse wheel scrolling, track jumping, and draggable scrollbars.
 - **Clipboard support**: `Ctrl+C` copies the active input value, running log, or result output instead of closing the app.
-- **Smart wrapping / truncation**: Long paths and output lines are wrapped or truncated to fit the terminal cleanly.
-
-## Command Categories
-
-- **Asset Operations**
-  - `detect`
-  - `batch_detect`
-  - `fix`
-  - `dump`
-  - `skeletal_mesh_info`
-
-- **Zen / IoStore**
-  - `to_zen`
-  - `create_mod_iostore`
-  - `extract_iostore_legacy`
-  - `inspect_zen`
-  - `is_iostore_compressed`
-  - `is_iostore_encrypted`
-  - `recompress_iostore`
-  - `extract_script_objects`
-  - `cityhash`
-
-- **PAK Operations**
-  - `create_pak`
-  - `create_companion_pak`
-  - `extract_pak`
-
-- **JSON Conversion**
-  - `to_json`
-  - `from_json`
-
-- **Niagara / Other**
-  - `niagara_list`
-  - `niagara_details`
-  - `niagara_edit`
-  - `modify_colors`
-  - `scan_childbp_isenemy`
 
 ## Requirements
 
 - **Windows or Linux**
-- **Go** to build from source
 - A matching `UAssetTool` binary for your platform
 
-The TUI can download the correct upstream `UAssetTool` release asset for the current OS/architecture if it is not already present.
-
-## Project Layout
-
-- `tui/` - Go TUI source and build output
-- `tui/UAssetTool.exe` - the CLI tool executed by the wrapper on Windows
-- `tui/UAssetTool` - the CLI tool executed by the wrapper on Linux
-- `tui/config.json` - saved settings written by the app
-
-## Build
-
-From the `tui` directory:
-
-### Dev run
-
-```powershell
-go run .
-```
-
-```bash
-go run .
-```
-
-### Dev build
-
-```powershell
-go build -o uassettool-tui.exe .
-```
-
-```bash
-go build -o uassettool-tui .
-```
-
-### Release build
-
-```powershell
-go build -trimpath -ldflags="-s -w" -o uassettool-tui.exe .
-```
-
-```bash
-go build -trimpath -ldflags="-s -w" -o uassettool-tui .
-```
+The TUI can download the correct upstream `UAssetTool` release asset for the current OS/architecture if it is not already present by running the download/update command.
 
 ## Usage
 
-Run the TUI from the `tui` directory:
+Run the TUI:
 
 ```powershell
 .\uassettool-tui.exe
@@ -112,7 +32,7 @@ Run the TUI from the `tui` directory:
 
 Typical flow:
 
-1. Open **Download / Update** if `UAssetTool` has not been downloaded yet for your platform.
+1. Open **Download / Update** to download or update the `UAssetTool` binary for your platform.
 2. Open **Settings** and configure your default paths and options.
 3. Open **Run Command** and choose a command category.
 4. Fill in the generated form fields.
@@ -125,6 +45,7 @@ Typical flow:
 - **Mouse**: select items, scroll output, and drag the scrollbar thumb in running/result panes
 - **PgUp / PgDn / Home / End**: faster output navigation
 - **Ctrl+C**: copy the active form value, setting value, running log, or result output
+- **Ctrl+X**: stop the UAssetTool process when running
 
 ## Configuration
 
@@ -146,3 +67,8 @@ Editing `config.json` manually is possible, but using the in-app **Settings** me
 - `Ctrl+C` is intentionally reserved for copy behavior inside the app and does not quit the program.
 - On Windows, `UAssetTool.exe` is expected to live beside `uassettool-tui.exe`.
 - On Linux, `UAssetTool` is expected to live beside `uassettool-tui` and is marked executable after download.
+
+## Acknowledgments
+
+- This project is a TUI wrapper around [UAssetToolRivals](https://github.com/XzantGaming/UAssetToolRivals).
+- The TUI is built using [Bubble Tea](https://github.com/charmbracelet/bubbletea) and [Bubble Tea Extensions](https://github.com/charmbracelet/bubbletea/tree/master/extensions).
