@@ -1,4 +1,4 @@
-package main
+package app
 
 import (
 	"archive/tar"
@@ -21,8 +21,24 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
+var programRef *tea.Program
+
 var runningCmdMu sync.Mutex
 var runningCmd *exec.Cmd
+
+func Run() {
+	p := tea.NewProgram(
+		initialModel(),
+		tea.WithAltScreen(),
+		tea.WithMouseCellMotion(),
+	)
+	programRef = p
+
+	if _, err := p.Run(); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+}
 
 func setRunningCmd(cmd *exec.Cmd) {
 	runningCmdMu.Lock()
