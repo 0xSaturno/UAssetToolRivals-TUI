@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 
 	"github.com/atotto/clipboard"
@@ -164,6 +165,63 @@ func copyTextToClipboard(text string) string {
 	return "Copied to clipboard"
 }
 
+func normalizeInputValue(val string) string {
+	val = strings.TrimSpace(strings.Trim(val, `"`))
+	if val == "" {
+		return ""
+	}
+	val = strings.ReplaceAll(val, `\`, `/`)
+	val = strings.ReplaceAll(val, `//`, `/`)
+	if strings.Contains(val, ":/") || strings.HasPrefix(val, "/") || strings.HasPrefix(val, "./") || strings.HasPrefix(val, "../") {
+		val = filepath.Clean(val)
+	}
+	return val
+}
+
+func quoteArg(val string) string {
+	if val == "" {
+		return ""
+	}
+	val = strings.ReplaceAll(val, `"`, `\"`)
+	return fmt.Sprintf(`"%s"`, val)
+}
+
+func quotePathArg(val string) string {
+	return quoteArg(normalizeInputValue(val))
+}
+
+func isPathLikeField(label string) bool {
+	label = strings.ToLower(label)
+	return strings.Contains(label, "path") || strings.Contains(label, "directory") || strings.Contains(label, "file") || strings.Contains(label, "folder")
+}
+
+func shouldQuoteField(f formField, command string, index int) bool {
+	if isPathLikeField(f.label) {
+		return true
+	}
+	switch command {
+	case "create_mod_iostore":
+		return index == 0 || index == 1 || index == 2 || index == 3 || index == 6
+	case "extract_iostore_legacy":
+		return index == 0 || index == 1 || index == 2 || index == 3
+	case "extract_pak":
+		return index != 4
+	case "create_pak":
+		return index == 0 || index == 2
+	case "create_companion_pak":
+		return index == 0
+	case "to_json", "from_json", "batch_detect", "dump", "skeletal_mesh_info", "to_zen", "niagara_list", "niagara_details", "modify_colors", "scan_childbp_isenemy", "extract_script_objects", "inspect_zen", "is_iostore_compressed", "is_iostore_encrypted", "recompress_iostore", "detect", "fix":
+		return true
+	}
+	return false
+}
+
+func stopToolCmd() tea.Cmd {
+	return func() tea.Msg {
+		return toolStopMsg{err: stopRunningTool()}
+	}
+}
+
 // ── update ──────────────────────────────────────────────────────────────────
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -183,6 +241,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case toolOutputMsg:
 		m.runningOutput += msg.chunk
 		m.runningScroll = -1
+		return m, nil
+
+	case toolStopMsg:
+		if msg.err != nil {
+			m.status = "Stop failed: " + msg.err.Error()
+		} else {
+			m.status = "Panic stop sent"
+		}
 		return m, nil
 
 	case toolDoneMsg:
@@ -429,6 +495,9 @@ func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case viewRunning:
 		switch key {
+		case "ctrl+x", "ctrl+z":
+			m.status = "Stopping UAssetTool..."
+			return m, stopToolCmd()
 		case "up", "k":
 			if m.runningScroll > 0 {
 				m.runningScroll--
@@ -736,7 +805,7 @@ func (m model) buildArgs() string {
 	parts = append(parts, m.form.command)
 
 	for i, f := range m.form.fields {
-		val := strings.TrimSpace(m.formInputs[i].Value())
+		val := normalizeInputValue(m.formInputs[i].Value())
 		if val == "" {
 			continue
 		}
@@ -748,17 +817,17 @@ func (m model) buildArgs() string {
 				}
 			case "create_mod_iostore":
 				switch i {
-				case 3:
+				case 4:
 					if strings.EqualFold(val, "n") {
 						parts = append(parts, "--no-compress")
 					} else {
 						parts = append(parts, "--compress")
 					}
-				case 4:
+				case 5:
 					if strings.EqualFold(val, "y") {
 						parts = append(parts, "--obfuscate")
 					}
-				case 6:
+				case 7:
 					if strings.EqualFold(val, "y") {
 						parts = append(parts, "--no-material-tags")
 					}
@@ -789,36 +858,50 @@ func (m model) buildArgs() string {
 			continue
 		}
 		switch m.form.command {
-		case "create_mod_iostore":
+		case "detect", "fix":
 			if i == 1 {
-				parts = append(parts, "--usmap", fmt.Sprintf(`"%s"`, val))
+				parts = append(parts, quotePathArg(val))
 				continue
 			}
-			if i == 5 {
-				parts = append(parts, "--pak-aes", fmt.Sprintf(`"%s"`, val))
+		case "create_mod_iostore":
+			if i == 1 {
+				parts = append(parts, "--mount-point", quoteArg(val))
+				continue
+			}
+			if i == 2 {
+				parts = append(parts, "--game-path", quoteArg(val))
+				continue
+			}
+			if i == 6 {
+				parts = append(parts, "--pak-aes", quoteArg(val))
 				continue
 			}
 		case "extract_pak":
 			if i == 2 {
-				parts = append(parts, "--aes", fmt.Sprintf(`"%s"`, val))
+				parts = append(parts, "--aes", quoteArg(val))
 				continue
 			}
 			if i == 4 {
-				parts = append(parts, "--filter", val)
+				parts = append(parts, "--filter", quoteArg(val))
 				continue
 			}
 		case "extract_iostore_legacy":
 			if i == 2 {
-				parts = append(parts, "--filter", val)
+				parts = append(parts, "--mod", quotePathArg(val))
 				continue
 			}
-			if i == 4 {
-				parts = append(parts, "--mod", fmt.Sprintf(`"%s"`, val))
+			if i == 3 {
+				parts = append(parts, "--filter", quoteArg(val))
 				continue
 			}
 		case "create_pak":
 			if i == 2 {
-				parts = append(parts, "--mount-point", fmt.Sprintf(`"%s"`, val))
+				parts = append(parts, "--mount-point", quoteArg(val))
+				continue
+			}
+		case "scan_childbp_isenemy":
+			if i == 1 {
+				parts = append(parts, "--aes", quoteArg(val))
 				continue
 			}
 		case "niagara_edit":
@@ -827,7 +910,15 @@ func (m model) buildArgs() string {
 				continue
 			}
 		}
-		parts = append(parts, fmt.Sprintf(`"%s"`, val))
+		if shouldQuoteField(f, m.form.command, i) {
+			if isPathLikeField(f.label) {
+				parts = append(parts, quotePathArg(val))
+			} else {
+				parts = append(parts, quoteArg(val))
+			}
+		} else {
+			parts = append(parts, val)
+		}
 	}
 
 	return strings.Join(parts, " ")

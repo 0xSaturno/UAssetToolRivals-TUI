@@ -21,6 +21,39 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
+var runningCmdMu sync.Mutex
+var runningCmd *exec.Cmd
+
+func setRunningCmd(cmd *exec.Cmd) {
+	runningCmdMu.Lock()
+	runningCmd = cmd
+	runningCmdMu.Unlock()
+}
+
+func clearRunningCmd(cmd *exec.Cmd) {
+	runningCmdMu.Lock()
+	if runningCmd == cmd {
+		runningCmd = nil
+	}
+	runningCmdMu.Unlock()
+}
+
+func stopRunningTool() error {
+	runningCmdMu.Lock()
+	cmd := runningCmd
+	runningCmdMu.Unlock()
+	if cmd == nil || cmd.Process == nil {
+		return fmt.Errorf("no running UAssetTool process")
+	}
+	if programRef != nil {
+		programRef.Send(toolOutputMsg{chunk: "\n[panic] stop requested, terminating UAssetTool...\n"})
+	}
+	if runtime.GOOS == "windows" {
+		return exec.Command("taskkill", "/PID", fmt.Sprintf("%d", cmd.Process.Pid), "/T", "/F").Run()
+	}
+	return cmd.Process.Kill()
+}
+
 func exePath() string {
 	exe, _ := os.Executable()
 	name := "UAssetTool"
@@ -231,6 +264,8 @@ func runTool(args string) (string, error) {
 	if err := cmd.Start(); err != nil {
 		return "", err
 	}
+	setRunningCmd(cmd)
+	defer clearRunningCmd(cmd)
 
 	p := programRef
 	var combined bytes.Buffer

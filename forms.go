@@ -38,6 +38,7 @@ func assetForm(choice int) *commandForm {
 	case 0:
 		return &commandForm{command: "detect", fields: []formField{
 			{label: "Asset Path (.uasset)"},
+			{label: "Mappings Path (.usmap)", configKey: "UsmapPath", optional: true},
 		}}
 	case 1:
 		return &commandForm{command: "batch_detect", fields: []formField{
@@ -47,6 +48,7 @@ func assetForm(choice int) *commandForm {
 	case 2:
 		return &commandForm{command: "fix", fields: []formField{
 			{label: "Asset Path (.uasset)"},
+			{label: "Mappings Path (.usmap)", configKey: "UsmapPath", optional: true},
 		}}
 	case 3:
 		return &commandForm{command: "dump", fields: []formField{
@@ -73,7 +75,8 @@ func zenForm(choice int) *commandForm {
 	case 1:
 		return &commandForm{command: "create_mod_iostore", fields: []formField{
 			{label: "Output Base Name"},
-			{label: "Mappings Path (.usmap)", configKey: "UsmapPath", optional: true},
+			{label: "Mount Point (default ../../../)", optional: true},
+			{label: "Game Path (default Marvel/Content/)", optional: true},
 			{label: "UAsset Files (space sep or directory)"},
 			{label: "Compress?", boolToggle: true, optional: true},
 			{label: "Enable Obfuscation?", boolToggle: true, optional: true},
@@ -84,9 +87,9 @@ func zenForm(choice int) *commandForm {
 		return &commandForm{command: "extract_iostore_legacy", fields: []formField{
 			{label: "Paks Directory", configKey: "GamePaksDir"},
 			{label: "Output Directory", configKey: "OutputExtractionDir"},
+			{label: "Mod Container Path(s)", optional: true},
 			{label: "Filter Patterns (space sep)", optional: true},
 			{label: "Extract dependencies?", boolToggle: true, optional: true, defaultVal: "N"},
-			{label: "Mod Container Path(s)", optional: true},
 		}}
 	case 3:
 		return &commandForm{command: "inspect_zen", fields: []formField{
@@ -190,6 +193,7 @@ func niagaraForm(choice int) *commandForm {
 	case 4:
 		return &commandForm{command: "scan_childbp_isenemy", fields: []formField{
 			{label: "Paks Directory or Extracted Folder", configKey: "GamePaksDir"},
+			{label: "AES Key", configKey: "AesKey", optional: true},
 			{label: "Is Extracted?", boolToggle: true, optional: true},
 		}}
 	}

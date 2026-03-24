@@ -82,6 +82,10 @@ type toolOutputMsg struct {
 	chunk string
 }
 
+type toolStopMsg struct {
+	err error
+}
+
 type spinTickMsg struct{}
 
 func spinTick() tea.Cmd {

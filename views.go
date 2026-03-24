@@ -522,7 +522,11 @@ func (m model) viewRunning() string {
 	}
 	b.WriteString(renderManualBox(logLines, logWidth, lipgloss.NewStyle().Foreground(lipgloss.Color(colorBorder)), maxLines, m.runningScroll))
 	b.WriteString("\n")
-	b.WriteString("  " + dimStyle.Render("Live debug log from UAT  •  ↑↓ scroll  PgUp/PgDn jump  Home/End  •  Ctrl+C copy"))
+	b.WriteString("  " + dimStyle.Render("Live debug log from UAT  •  ↑↓ scroll  PgUp/PgDn jump  Home/End  •  Ctrl+C copy  •  Ctrl+X stop"))
+	b.WriteString("\n")
+	if m.status != "" {
+		b.WriteString("  " + accentRed.Render(m.status))
+	}
 	b.WriteString("\n")
 
 	return b.String()
