@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"runtime/debug"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -502,6 +503,8 @@ func fetchReleaseInfoFromURL(apiURL string) (*ReleaseInfo, error) {
 		return nil, err
 	}
 	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
+	req.Header.Set("User-Agent", "UAssetTool-TUI")
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -510,6 +513,28 @@ func fetchReleaseInfoFromURL(apiURL string) (*ReleaseInfo, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != 200 {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+		message := strings.TrimSpace(string(body))
+		remaining := strings.TrimSpace(resp.Header.Get("X-RateLimit-Remaining"))
+		reset := strings.TrimSpace(resp.Header.Get("X-RateLimit-Reset"))
+		fmt.Println("[debug] GitHub API failure:", resp.StatusCode, "remaining=", remaining, "reset=", reset, "body=", message)
+
+		if resp.StatusCode == http.StatusForbidden {
+			if remaining == "0" {
+				if resetUnix, parseErr := strconv.ParseInt(reset, 10, 64); parseErr == nil && resetUnix > 0 {
+					resetTime := time.Unix(resetUnix, 0).Local().Format(time.RFC1123)
+					return nil, fmt.Errorf("GitHub API rate limit exceeded (resets %s)", resetTime)
+				}
+				return nil, fmt.Errorf("GitHub API rate limit exceeded")
+			}
+			if message != "" {
+				return nil, fmt.Errorf("GitHub API returned 403: %s", message)
+			}
+		}
+
+		if message != "" {
+			return nil, fmt.Errorf("GitHub API returned %d: %s", resp.StatusCode, message)
+		}
 		return nil, fmt.Errorf("GitHub API returned %d", resp.StatusCode)
 	}
 
