@@ -583,31 +583,33 @@ func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if m.outputScroll > 0 {
 				m.outputScroll--
 			}
-			return m, nil
 		case "down", "j":
 			m.outputScroll++
-			return m, nil
 		case "pgup", "b":
 			m.outputScroll -= 8
 			if m.outputScroll < 0 {
 				m.outputScroll = 0
 			}
-			return m, nil
 		case "pgdown", "f":
 			m.outputScroll += 8
-			return m, nil
 		case "home":
 			m.outputScroll = 0
-			return m, nil
 		case "end":
 			m.outputScroll = -1
-			return m, nil
-		case "enter", "esc", "backspace":
-			m.state = viewMain
+		case "esc", "backspace", "q":
+			if m.form != nil {
+				m.state = viewForm
+				m.status = ""
+				m.outputScroll = 0
+				m.output = ""
+				m.outputErr = false
+				return m, nil
+			}
 			m.output = ""
+			m.outputErr = false
 			m.outputScroll = 0
-			m.cursor = 0
 			m.dlInfo = nil
+			return m.goBack()
 		}
 		return m, nil
 

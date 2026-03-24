@@ -604,10 +604,18 @@ if errorlevel 1 (
   exit /b 1
 )
 start "" %q
-ping 127.0.0.1 -n 2 > nul
-if exist %q del /F /Q %q > nul 2>nul
+set cleanup_tries=0
+:cleanup_backup
+if not exist %q goto cleanup_done
 del /F /Q %q > nul 2>nul
-`, currentPID, currentPID, currentPID, tmpBak, tmpBak, currentExe, tmpBak, tmpNew, currentExe, currentExe, tmpBak, tmpBak, scriptPath)
+if not exist %q goto cleanup_done
+set /a cleanup_tries+=1
+call if %%cleanup_tries%% geq 10 goto cleanup_done
+ping 127.0.0.1 -n 2 > nul
+goto cleanup_backup
+:cleanup_done
+del /F /Q %q > nul 2>nul
+`, currentPID, currentPID, currentPID, tmpBak, tmpBak, currentExe, tmpBak, tmpNew, currentExe, currentExe, tmpBak, tmpBak, tmpBak, scriptPath)
 	if _, err := script.WriteString(scriptBody); err != nil {
 		script.Close()
 		return err
