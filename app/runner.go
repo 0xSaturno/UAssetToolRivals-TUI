@@ -576,6 +576,53 @@ func autoCheckUpdatesCmd(cfg Config) tea.Cmd {
 	}
 }
 
+func launchWindowsSelfReplace(currentExe, tmpNew, tmpBak string) error {
+	currentPID := os.Getpid()
+	script, err := os.CreateTemp("", "uassettool-tui-selfupdate-*.cmd")
+	if err != nil {
+		return err
+	}
+	scriptPath := script.Name()
+	scriptBody := fmt.Sprintf(`@echo off
+setlocal enableextensions
+echo [debug] self-update helper started for PID %d
+:wait_for_exit
+tasklist /FI "PID eq %d" 2>nul | find "%d" >nul
+if not errorlevel 1 (
+  ping 127.0.0.1 -n 2 > nul
+  goto wait_for_exit
+)
+echo [debug] current process exited, replacing executable
+if exist %q del /F /Q %q > nul 2>nul
+move /Y %q %q > nul
+if errorlevel 1 (
+  echo [debug] failed to rename current exe to backup
+)
+move /Y %q %q > nul
+if errorlevel 1 (
+  echo [debug] failed to promote new exe
+  exit /b 1
+)
+start "" %q
+ping 127.0.0.1 -n 2 > nul
+if exist %q del /F /Q %q > nul 2>nul
+del /F /Q %q > nul 2>nul
+`, currentPID, currentPID, currentPID, tmpBak, tmpBak, currentExe, tmpBak, tmpNew, currentExe, currentExe, tmpBak, tmpBak, scriptPath)
+	if _, err := script.WriteString(scriptBody); err != nil {
+		script.Close()
+		return err
+	}
+	if err := script.Close(); err != nil {
+		return err
+	}
+	cmd := exec.Command("cmd", "/C", scriptPath)
+	fmt.Println("[debug] launching Windows self-update helper:", scriptPath)
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	return nil
+}
+
 func performTUISelfUpdate(info *ReleaseInfo) (string, error) {
 	if info == nil {
 		return "", fmt.Errorf("missing TUI release metadata")
@@ -612,10 +659,7 @@ func performTUISelfUpdate(info *ReleaseInfo) (string, error) {
 		return "", err
 	}
 	if runtime.GOOS == "windows" {
-		cmdLine := fmt.Sprintf("ping 127.0.0.1 -n 3 > nul && copy /Y %q %q > nul && del /F /Q %q > nul 2>nul && start \"\" %q", tmpNew, currentExe, tmpNew, currentExe)
-		fmt.Println("[debug] TUI self-update restart command:", cmdLine)
-		cmd := exec.Command("cmd", "/C", cmdLine)
-		if err := cmd.Start(); err != nil {
+		if err := launchWindowsSelfReplace(currentExe, tmpNew, tmpBak); err != nil {
 			return "", err
 		}
 		return "TUI updated. Restarting...", nil
