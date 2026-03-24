@@ -1,6 +1,7 @@
 package app
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/charmbracelet/bubbles/textinput"
@@ -26,16 +27,18 @@ const (
 	viewDownloading
 	viewSettingInput
 	viewPreview
+	viewPrompt
 )
 
 // ── model ───────────────────────────────────────────────────────────────────
 
 type model struct {
-	state  viewState
-	cursor int
-	config Config
-	width  int
-	height int
+	state     viewState
+	prevState viewState
+	cursor    int
+	config    Config
+	width     int
+	height    int
 
 	// form
 	form         *commandForm
@@ -69,6 +72,11 @@ type model struct {
 
 	// animation
 	spinFrame int
+
+	updateQueue   []updatePromptSpec
+	prompt        *updatePromptSpec
+	promptCursor  int
+	startupChecks bool
 }
 
 // ── messages ────────────────────────────────────────────────────────────────
@@ -88,6 +96,40 @@ type toolStopMsg struct {
 
 type spinTickMsg struct{}
 
+type updateCheckMsg struct {
+	state updateCheckState
+	err   error
+}
+
+type updatePromptResultMsg struct {
+	action string
+	err    error
+	text   string
+}
+
+type updatePromptSpec struct {
+	title    string
+	body     []string
+	action   string
+	confirm  string
+	cancel   string
+	release  *ReleaseInfo
+	version  string
+	command  string
+	autoRun  bool
+	restart  bool
+	severity string
+}
+
+type updateCheckState struct {
+	UATCurrentVersion string
+	UATLatest         *ReleaseInfo
+	UATNeedsUpdate    bool
+	TUICurrentVersion string
+	TUILatest         *ReleaseInfo
+	TUINeedsUpdate    bool
+}
+
 func spinTick() tea.Cmd {
 	return tea.Tick(100*time.Millisecond, func(time.Time) tea.Msg {
 		return spinTickMsg{}
@@ -106,7 +148,11 @@ func initialModel() model {
 }
 
 func (m model) Init() tea.Cmd {
-	return tea.SetWindowTitle("UAssetTool Manager")
+	fmt.Println("[debug] initializing TUI model")
+	return tea.Batch(
+		tea.SetWindowTitle("UAssetTool Manager"),
+		autoCheckUpdatesCmd(m.config),
+	)
 }
 
 // ── helpers ─────────────────────────────────────────────────────────────────

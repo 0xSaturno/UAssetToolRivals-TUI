@@ -231,6 +231,53 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = msg.Height
 		return m, nil
 
+	case updateCheckMsg:
+		m.startupChecks = true
+		if msg.err != nil {
+			fmt.Println("[debug] auto update check completed with partial/full error:", msg.err)
+			m.status = "Update check failed: " + msg.err.Error()
+		} else {
+			fmt.Println("[debug] auto update check completed successfully")
+		}
+		m.queueUpdatePrompts(msg.state)
+		return m.showNextPrompt()
+
+	case updatePromptResultMsg:
+		fmt.Println("[debug] update prompt result:", msg.action, msg.text, msg.err)
+		if msg.action == "update-uat" && msg.err == nil && msg.text == "run-uat-update" {
+			m.prompt = nil
+			m.promptCursor = 0
+			m.prevState = viewMain
+			m.state = viewDownloading
+			m.status = "Fetching release info..."
+			m.dlProgress = downloadProgressMsg{}
+			return m, tea.Batch(spinTick(), downloadToolCmd())
+		}
+		if msg.err != nil {
+			m.state = viewOutput
+			m.status = ""
+			m.output = "Update failed: " + msg.err.Error()
+			m.outputErr = true
+			m.outputScroll = -1
+			m.prompt = nil
+			m.promptCursor = 0
+			return m, nil
+		}
+		if msg.action == "update-tui" {
+			m.prompt = nil
+			m.promptCursor = 0
+			m.state = viewOutput
+			m.status = ""
+			m.output = msg.text
+			m.outputErr = false
+			m.outputScroll = -1
+			return m, tea.Quit
+		}
+		m.prompt = nil
+		m.promptCursor = 0
+		m.status = msg.text
+		return m.showNextPrompt()
+
 	case spinTickMsg:
 		if m.state == viewRunning || m.state == viewDownloading {
 			m.spinFrame++
@@ -273,6 +320,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case downloadCompleteMsg:
 		m.dlInfo = msg.info
 		m.state = viewOutput
+		m.status = ""
 		if msg.err != nil {
 			m.output = "Download failed: " + msg.err.Error()
 			m.outputErr = true
@@ -305,6 +353,76 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, cmd
 	}
 
+	return m, nil
+}
+
+func (m *model) queueUpdatePrompts(state updateCheckState) {
+	if state.UATNeedsUpdate && state.UATLatest != nil {
+		m.updateQueue = append(m.updateQueue, updatePromptSpec{
+			title: "UAssetTool Update Available",
+			body: []string{
+				fmt.Sprintf("Installed UAT: %s", blankVersionFallback(state.UATCurrentVersion)),
+				fmt.Sprintf("Latest UAT: %s", blankVersionFallback(state.UATLatest.TagName)),
+				"Run the UAT update command now?",
+			},
+			action:   "update-uat",
+			confirm:  "Update UAT",
+			cancel:   "Skip",
+			release:  state.UATLatest,
+			version:  state.UATLatest.TagName,
+			severity: "info",
+		})
+	}
+	if state.TUINeedsUpdate && state.TUILatest != nil {
+		m.updateQueue = append(m.updateQueue, updatePromptSpec{
+			title: "TUI Update Available",
+			body: []string{
+				fmt.Sprintf("Installed TUI: %s", blankVersionFallback(state.TUICurrentVersion)),
+				fmt.Sprintf("Latest TUI: %s", blankVersionFallback(state.TUILatest.TagName)),
+				"Download, replace this executable, and restart now?",
+			},
+			action:   "update-tui",
+			confirm:  "Update TUI",
+			cancel:   "Skip",
+			release:  state.TUILatest,
+			version:  state.TUILatest.TagName,
+			restart:  true,
+			severity: "warn",
+		})
+	}
+}
+
+func blankVersionFallback(v string) string {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return "unknown"
+	}
+	return v
+}
+
+func (m model) showNextPrompt() (tea.Model, tea.Cmd) {
+	if len(m.updateQueue) == 0 {
+		return m, nil
+	}
+	m.prevState = m.state
+	next := m.updateQueue[0]
+	m.updateQueue = m.updateQueue[1:]
+	m.prompt = &next
+	m.promptCursor = 0
+	m.state = viewPrompt
+	return m, nil
+}
+
+func (m model) dismissPrompt() (tea.Model, tea.Cmd) {
+	if m.prompt != nil {
+		fmt.Println("[debug] update prompt dismissed:", m.prompt.action)
+	}
+	m.prompt = nil
+	m.promptCursor = 0
+	if len(m.updateQueue) > 0 {
+		return m.showNextPrompt()
+	}
+	m.state = viewMain
 	return m, nil
 }
 
@@ -524,6 +642,9 @@ func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case viewPreview:
 		return m.handlePreviewKey(msg)
 
+	case viewPrompt:
+		return m.handlePromptKey(msg)
+
 	case viewForm:
 		return m.handleFormKey(msg)
 
@@ -574,6 +695,42 @@ func (m model) handlePreviewKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.state = viewCategory
 		m.cursor = 0
 		return m, nil
+	}
+	return m, nil
+}
+
+func (m model) handlePromptKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	key := msg.String()
+	switch key {
+	case "left", "h", "right", "l", "tab":
+		if m.promptCursor == 0 {
+			m.promptCursor = 1
+		} else {
+			m.promptCursor = 0
+		}
+		return m, nil
+	case "y", "Y":
+		m.promptCursor = 0
+		if m.prompt == nil {
+			return m, nil
+		}
+		m.status = "Running update..."
+		return m, performPromptAction(m.prompt)
+	case "n", "N":
+		m.promptCursor = 1
+		return m.dismissPrompt()
+	case "enter":
+		if m.promptCursor == 0 {
+			if m.prompt == nil {
+				return m, nil
+			}
+			m.status = "Running update..."
+			return m, performPromptAction(m.prompt)
+		}
+		return m.dismissPrompt()
+	case "esc", "backspace":
+		m.promptCursor = 1
+		return m.dismissPrompt()
 	}
 	return m, nil
 }
@@ -797,6 +954,18 @@ func (m model) submitForm() (tea.Model, tea.Cmd) {
 	})
 }
 
+func rawInputValue(val string) string {
+	return strings.TrimSpace(strings.Trim(val, `"`))
+}
+
+func splitMultiValueInput(val string) []string {
+	val = strings.TrimSpace(val)
+	if val == "" {
+		return nil
+	}
+	return splitArgs(val)
+}
+
 func (m model) buildArgs() string {
 	if m.form == nil {
 		return ""
@@ -805,8 +974,9 @@ func (m model) buildArgs() string {
 	parts = append(parts, m.form.command)
 
 	for i, f := range m.form.fields {
-		val := normalizeInputValue(m.formInputs[i].Value())
-		if val == "" {
+		rawVal := rawInputValue(m.formInputs[i].Value())
+		val := normalizeInputValue(rawVal)
+		if rawVal == "" {
 			continue
 		}
 		if f.boolToggle {
@@ -832,8 +1002,21 @@ func (m model) buildArgs() string {
 						parts = append(parts, "--no-material-tags")
 					}
 				}
+			case "create_iostore_bundle":
+				switch i {
+				case 3:
+					if strings.EqualFold(val, "n") {
+						parts = append(parts, "--no-compress")
+					} else {
+						parts = append(parts, "--compress")
+					}
+				case 4:
+					if strings.EqualFold(val, "y") {
+						parts = append(parts, "--encrypt")
+					}
+				}
 			case "extract_iostore_legacy":
-				if strings.EqualFold(val, "y") {
+				if i == 5 && strings.EqualFold(val, "y") {
 					parts = append(parts, "--with-deps")
 				}
 			case "create_pak":
@@ -846,9 +1029,9 @@ func (m model) buildArgs() string {
 				if i == 3 && strings.EqualFold(val, "y") {
 					parts = append(parts, "--list")
 				}
-			case "niagara_details":
-				if strings.EqualFold(val, "y") {
-					parts = append(parts, "--full")
+			case "inject_texture":
+				if i == 4 && strings.EqualFold(val, "y") {
+					parts = append(parts, "--no-mips")
 				}
 			case "scan_childbp_isenemy":
 				if strings.EqualFold(val, "y") {
@@ -861,6 +1044,28 @@ func (m model) buildArgs() string {
 		case "detect", "fix":
 			if i == 1 {
 				parts = append(parts, quotePathArg(val))
+				continue
+			}
+		case "inject_texture":
+			if i == 3 {
+				parts = append(parts, "--format", val)
+				continue
+			}
+			if i == 5 {
+				parts = append(parts, "--usmap", quotePathArg(val))
+				continue
+			}
+		case "extract_texture":
+			if i == 2 {
+				parts = append(parts, "--format", strings.ToUpper(rawVal))
+				continue
+			}
+			if i == 3 {
+				parts = append(parts, "--mip", rawVal)
+				continue
+			}
+			if i == 4 {
+				parts = append(parts, "--usmap", quotePathArg(val))
 				continue
 			}
 		case "create_mod_iostore":
@@ -876,27 +1081,113 @@ func (m model) buildArgs() string {
 				parts = append(parts, "--pak-aes", quoteArg(val))
 				continue
 			}
+			if i == 3 {
+				for _, item := range splitMultiValueInput(rawVal) {
+					parts = append(parts, quotePathArg(item))
+				}
+				continue
+			}
+		case "create_iostore_bundle":
+			if i == 1 {
+				for _, item := range splitMultiValueInput(rawVal) {
+					parts = append(parts, quotePathArg(item))
+				}
+				continue
+			}
+			if i == 2 {
+				parts = append(parts, "--mount-point", quoteArg(val))
+				continue
+			}
+			if i == 5 {
+				parts = append(parts, "--aes-key", quoteArg(val))
+				continue
+			}
+		case "create_companion_pak":
+			if i == 1 {
+				for _, item := range splitMultiValueInput(rawVal) {
+					parts = append(parts, quoteArg(item))
+				}
+				continue
+			}
+			if i == 2 {
+				parts = append(parts, "--mount-point", quoteArg(val))
+				continue
+			}
+			if i == 3 {
+				parts = append(parts, "--path-hash-seed", rawVal)
+				continue
+			}
+			if i == 4 {
+				parts = append(parts, "--aes-key", quoteArg(val))
+				continue
+			}
+		case "extract_iostore":
+			if i == 2 {
+				parts = append(parts, "--package", quoteArg(rawVal))
+				continue
+			}
+			if i == 3 {
+				parts = append(parts, "--chunk-id", rawVal)
+				continue
+			}
+			if i == 4 {
+				parts = append(parts, "--aes", quoteArg(val))
+				continue
+			}
 		case "extract_pak":
 			if i == 2 {
 				parts = append(parts, "--aes", quoteArg(val))
 				continue
 			}
 			if i == 4 {
-				parts = append(parts, "--filter", quoteArg(val))
+				parts = append(parts, "--filter")
+				for _, item := range splitMultiValueInput(rawVal) {
+					parts = append(parts, quoteArg(item))
+				}
 				continue
 			}
 		case "extract_iostore_legacy":
 			if i == 2 {
-				parts = append(parts, "--mod", quotePathArg(val))
+				parts = append(parts, "--mod")
+				for _, item := range splitMultiValueInput(rawVal) {
+					parts = append(parts, quotePathArg(item))
+				}
 				continue
 			}
 			if i == 3 {
-				parts = append(parts, "--filter", quoteArg(val))
+				parts = append(parts, "--filter")
+				for _, item := range splitMultiValueInput(rawVal) {
+					parts = append(parts, quoteArg(item))
+				}
+				continue
+			}
+			if i == 4 {
+				parts = append(parts, "--aes", quoteArg(val))
 				continue
 			}
 		case "create_pak":
+			if i == 1 {
+				for _, item := range splitMultiValueInput(rawVal) {
+					parts = append(parts, quotePathArg(item))
+				}
+				continue
+			}
 			if i == 2 {
 				parts = append(parts, "--mount-point", quoteArg(val))
+				continue
+			}
+		case "list_iostore":
+			if i == 1 {
+				parts = append(parts, "--aes", quoteArg(val))
+				continue
+			}
+			if i == 2 {
+				parts = append(parts, "--filter", quoteArg(rawVal))
+				continue
+			}
+		case "dump_zen_from_game":
+			if i == 1 {
+				parts = append(parts, quoteArg(rawVal))
 				continue
 			}
 		case "scan_childbp_isenemy":
@@ -904,9 +1195,31 @@ func (m model) buildArgs() string {
 				parts = append(parts, "--aes", quoteArg(val))
 				continue
 			}
+		case "niagara_details":
+			if i == 1 {
+				parts = append(parts, "--usmap", quotePathArg(val))
+				continue
+			}
 		case "niagara_edit":
+			if i == 1 {
+				parts = append(parts, "--usmap", quotePathArg(val))
+				continue
+			}
 			if i == 2 {
-				parts = append(parts, val)
+				parts = append(parts, "--output", quotePathArg(val))
+				continue
+			}
+			if i == 3 {
+				parts = append(parts, "--edits", quoteArg(rawVal))
+				continue
+			}
+			if i == 4 {
+				parts = append(parts, "--edits-file", quotePathArg(val))
+				continue
+			}
+		case "niagara_audit":
+			if i == 1 {
+				parts = append(parts, quotePathArg(val))
 				continue
 			}
 		}

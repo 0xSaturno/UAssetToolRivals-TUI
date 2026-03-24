@@ -60,6 +60,23 @@ func assetForm(choice int) *commandForm {
 			{label: "Asset Path (.uasset)"},
 			{label: "Mappings Path (.usmap)", configKey: "UsmapPath"},
 		}}
+	case 5:
+		return &commandForm{command: "inject_texture", fields: []formField{
+			{label: "Base UAsset (.uasset)"},
+			{label: "Image File (png/tga/dds/bmp/jpeg)"},
+			{label: "Output UAsset (.uasset)"},
+			{label: "Compression Format (BC7/BC3/BC1/BC5/BC4/BGRA8)", optional: true},
+			{label: "Disable Mipmaps?", boolToggle: true, optional: true},
+			{label: "Mappings Path (.usmap)", configKey: "UsmapPath", optional: true},
+		}}
+	case 6:
+		return &commandForm{command: "extract_texture", fields: []formField{
+			{label: "Texture UAsset (.uasset)"},
+			{label: "Output Image Path"},
+			{label: "Output Format (PNG/TGA/DDS/BMP)", optional: true},
+			{label: "Mip Index", optional: true},
+			{label: "Mappings Path (.usmap)", configKey: "UsmapPath", optional: true},
+		}}
 	}
 	return nil
 }
@@ -73,6 +90,15 @@ func zenForm(choice int) *commandForm {
 			{label: "Disable Material Tags?", boolToggle: true, optional: true},
 		}}
 	case 1:
+		return &commandForm{command: "create_iostore_bundle", fields: []formField{
+			{label: "Output Base Name"},
+			{label: "Input Files (space sep)"},
+			{label: "Mount Point (default ../../../)", optional: true},
+			{label: "Compress?", boolToggle: true, optional: true},
+			{label: "Enable Encryption?", boolToggle: true, optional: true},
+			{label: "AES Key", configKey: "AesKey", optional: true},
+		}}
+	case 2:
 		return &commandForm{command: "create_mod_iostore", fields: []formField{
 			{label: "Output Base Name"},
 			{label: "Mount Point (default ../../../)", optional: true},
@@ -83,36 +109,57 @@ func zenForm(choice int) *commandForm {
 			{label: "PAK AES Key", configKey: "AesKey", optional: true},
 			{label: "Disable Material Tags?", boolToggle: true, optional: true},
 		}}
-	case 2:
+	case 3:
+		return &commandForm{command: "extract_iostore", fields: []formField{
+			{label: "UTOC Path"},
+			{label: "Output Directory"},
+			{label: "Package Name", optional: true},
+			{label: "Chunk ID (hex)", optional: true},
+			{label: "AES Key", configKey: "AesKey", optional: true},
+		}}
+	case 4:
 		return &commandForm{command: "extract_iostore_legacy", fields: []formField{
 			{label: "Paks Directory", configKey: "GamePaksDir"},
 			{label: "Output Directory", configKey: "OutputExtractionDir"},
 			{label: "Mod Container Path(s)", optional: true},
 			{label: "Filter Patterns (space sep)", optional: true},
+			{label: "AES Key", configKey: "AesKey", optional: true},
 			{label: "Extract dependencies?", boolToggle: true, optional: true, defaultVal: "N"},
 		}}
-	case 3:
+	case 5:
 		return &commandForm{command: "inspect_zen", fields: []formField{
 			{label: "Zen File (.ucas/.zen)"},
 		}}
-	case 4:
+	case 6:
+		return &commandForm{command: "list_iostore", fields: []formField{
+			{label: "UTOC Path or Directory"},
+			{label: "AES Key", configKey: "AesKey", optional: true},
+			{label: "Filter Pattern", optional: true},
+		}}
+	case 7:
+		return &commandForm{command: "dump_zen_from_game", fields: []formField{
+			{label: "Paks Directory", configKey: "GamePaksDir"},
+			{label: "Package Path (/Game/...)"},
+			{label: "Output File", optional: true},
+		}}
+	case 8:
 		return &commandForm{command: "is_iostore_compressed", fields: []formField{
 			{label: "UTOC Path"},
 		}}
-	case 5:
+	case 9:
 		return &commandForm{command: "is_iostore_encrypted", fields: []formField{
 			{label: "UTOC Path"},
 		}}
-	case 6:
+	case 10:
 		return &commandForm{command: "recompress_iostore", fields: []formField{
 			{label: "UTOC Path"},
 		}}
-	case 7:
+	case 11:
 		return &commandForm{command: "extract_script_objects", fields: []formField{
 			{label: "Paks Directory", configKey: "GamePaksDir"},
 			{label: "Output File (ScriptObjects.bin)"},
 		}}
-	case 8:
+	case 12:
 		return &commandForm{command: "cityhash", fields: []formField{
 			{label: "Path/String for cityhash"},
 		}}
@@ -133,6 +180,9 @@ func pakForm(choice int) *commandForm {
 		return &commandForm{command: "create_companion_pak", fields: []formField{
 			{label: "Output PAK Path"},
 			{label: "File Paths (space sep)"},
+			{label: "Mount Point (default ../../../)", optional: true},
+			{label: "Path Hash Seed", optional: true},
+			{label: "AES Key", configKey: "AesKey", optional: true},
 		}}
 	case 2:
 		return &commandForm{command: "extract_pak", fields: []formField{
@@ -167,30 +217,24 @@ func jsonForm(choice int) *commandForm {
 func niagaraForm(choice int) *commandForm {
 	switch choice {
 	case 0:
-		return &commandForm{command: "niagara_list", fields: []formField{
-			{label: "Directory"},
-			{label: "Mappings Path (.usmap)", configKey: "UsmapPath", optional: true},
-		}}
-	case 1:
 		return &commandForm{command: "niagara_details", fields: []formField{
 			{label: "Asset Path (.uasset)"},
 			{label: "Mappings Path (.usmap)", configKey: "UsmapPath", optional: true},
-			{label: "Show full details?", boolToggle: true, optional: true},
 		}}
-	case 2:
+	case 1:
 		return &commandForm{command: "niagara_edit", fields: []formField{
 			{label: "Asset Path (.uasset)"},
-			{label: "R G B A (space sep)"},
-			{label: "Extra options (e.g. --export-name Glow)", optional: true},
+			{label: "Mappings Path (.usmap)", configKey: "UsmapPath", optional: true},
+			{label: "Output Path (.uasset)", optional: true},
+			{label: "Edits JSON", optional: true},
+			{label: "Edits JSON File", optional: true},
+		}}
+	case 2:
+		return &commandForm{command: "niagara_audit", fields: []formField{
+			{label: "Asset Path (.uasset)"},
 			{label: "Mappings Path (.usmap)", configKey: "UsmapPath", optional: true},
 		}}
 	case 3:
-		return &commandForm{command: "modify_colors", fields: []formField{
-			{label: "Directory"},
-			{label: "Mappings Path (.usmap)", configKey: "UsmapPath"},
-			{label: "R G B A (space sep)"},
-		}}
-	case 4:
 		return &commandForm{command: "scan_childbp_isenemy", fields: []formField{
 			{label: "Paks Directory or Extracted Folder", configKey: "GamePaksDir"},
 			{label: "AES Key", configKey: "AesKey", optional: true},

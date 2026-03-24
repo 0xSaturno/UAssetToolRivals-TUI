@@ -28,8 +28,13 @@ func mainMenuDef(version string) menuDef {
 	if version != "" {
 		sub = "Running UAssetTool " + version
 	}
+	title := "UAssetTool TUI"
+	tuiVersion := normalizeVersionTag(currentTUIVersion())
+	if tuiVersion != "" && tuiVersion != "dev" && tuiVersion != "(devel)" {
+		title = "UAssetTool TUI v" + tuiVersion
+	}
 	return menuDef{
-		title:    "UAssetTool CLI",
+		title:    title,
 		subtitle: sub,
 		items: []menuItem{
 			{"Run Command", "▶", accentGreen, "Execute UAssetTool CLI commands"},
@@ -44,24 +49,26 @@ var categoryMenu = menuDef{
 	title:    "📂 Command Category",
 	subtitle: "Choose an operation type",
 	items: []menuItem{
-		{"Asset Operations", "🔍", accentGreen, "detect, fix, dump, skeletal mesh"},
-		{"Zen / IoStore", "📦", accentBlue, "convert, extract, create, inspect"},
-		{"PAK Operations", "🗃", accentYellow, "create, extract, companion pak"},
-		{"JSON Conversion", "🔄", accentGreen, "uasset ↔ json"},
-		{"Niagara / Other", "✨", accentMagenta, "niagara, colors, scan"},
+		{"Asset Operations", "🔍", accentGreen, "Detect, inspect, repair, and edit asset files"},
+		{"Zen / IoStore", "📦", accentBlue, "Convert, extract, build, and inspect IoStore data"},
+		{"PAK Operations", "🗃", accentYellow, "Create, extract, and package PAK archives"},
+		{"JSON Conversion", "🔄", accentGreen, "Convert assets to and from editable JSON"},
+		{"Niagara / Other", "✨", accentMagenta, "Inspect Niagara data and run batch utilities"},
 		{"← Back", " ", dimStyle, ""},
 	},
 }
 
 var assetOpsMenu = menuDef{
 	title:    "🔍 Asset Operations",
-	subtitle: "Inspect and fix UAsset files",
+	subtitle: "Inspect, fix, and edit UAsset files",
 	items: []menuItem{
-		{"Detect Type", "•", accentCyan, "detect"},
-		{"Batch Detect Type", "•", accentCyan, "batch_detect"},
-		{"Fix SerializeSize", "•", accentCyan, "fix"},
-		{"Dump Info", "•", accentCyan, "dump"},
-		{"Skeletal Mesh Info", "•", accentCyan, "skeletal_mesh_info"},
+		{"Detect Type", "•", accentCyan, "Identify what kind of asset a file contains"},
+		{"Batch Detect Type", "•", accentCyan, "Scan a folder and identify asset types in bulk"},
+		{"Fix SerializeSize", "•", accentCyan, "Repair broken serialize size values in an asset"},
+		{"Dump Info", "•", accentCyan, "Print detailed metadata and structure information"},
+		{"Skeletal Mesh Info", "•", accentCyan, "Show skeletal mesh sections, LODs, and related data"},
+		{"Inject Texture", "•", accentCyan, "Inject an image into a Texture2D asset"},
+		{"Extract Texture", "•", accentCyan, "Extract a Texture2D asset to an image file"},
 		{"← Back", " ", dimStyle, ""},
 	},
 }
@@ -70,15 +77,19 @@ var zenMenu = menuDef{
 	title:    "📦 Zen / IoStore Operations",
 	subtitle: "IoStore conversion and inspection",
 	items: []menuItem{
-		{"Legacy to Zen", "•", accentBlue, "to_zen"},
-		{"Create Mod IoStore", "•", accentBlue, "create_mod_iostore"},
-		{"Extract IoStore Legacy", "•", accentBlue, "extract_iostore_legacy"},
-		{"Inspect Zen", "•", accentBlue, "inspect_zen"},
-		{"Check Compression", "•", accentBlue, "is_iostore_compressed"},
-		{"Check Encryption", "•", accentBlue, "is_iostore_encrypted"},
-		{"Recompress IoStore", "•", accentBlue, "recompress_iostore"},
-		{"Extract ScriptObjects.bin", "•", accentBlue, "extract_script_objects"},
-		{"CityHash Path/String", "•", accentBlue, "cityhash"},
+		{"Legacy to Zen", "•", accentBlue, "Convert a legacy asset into Zen format"},
+		{"Create IoStore Bundle", "•", accentBlue, "Create a complete IoStore bundle from files"},
+		{"Create Mod IoStore", "•", accentBlue, "Build a mod-ready IoStore container"},
+		{"Extract IoStore Raw", "•", accentBlue, "Extract or list raw chunks from an IoStore container"},
+		{"Extract IoStore Legacy", "•", accentBlue, "Extract files from IoStore into legacy assets"},
+		{"Inspect Zen", "•", accentBlue, "View details and contents of a Zen container"},
+		{"List IoStore", "•", accentBlue, "List packages and chunk types inside IoStore containers"},
+		{"Dump Zen From Game", "•", accentBlue, "Dump a raw Zen package from the game Paks directory"},
+		{"Check Compression", "•", accentBlue, "Check whether an IoStore container is compressed"},
+		{"Check Encryption", "•", accentBlue, "Check whether an IoStore container is encrypted"},
+		{"Recompress IoStore", "•", accentBlue, "Recompress an existing IoStore container"},
+		{"Extract ScriptObjects.bin", "•", accentBlue, "Export ScriptObjects.bin from the game Paks folder"},
+		{"CityHash Path/String", "•", accentBlue, "Generate CityHash values for paths or text"},
 		{"← Back", " ", dimStyle, ""},
 	},
 }
@@ -87,9 +98,9 @@ var pakMenu = menuDef{
 	title:    "🗃 PAK Operations",
 	subtitle: "Create and extract PAK archives",
 	items: []menuItem{
-		{"Create PAK", "•", accentYellow, "create_pak"},
-		{"Create Companion PAK", "•", accentYellow, "create_companion_pak"},
-		{"Extract/List PAK", "•", accentYellow, "extract_pak"},
+		{"Create PAK", "•", accentYellow, "Package files into a new PAK archive"},
+		{"Create Companion PAK", "•", accentYellow, "Build the companion PAK file used with a mod container"},
+		{"Extract/List PAK", "•", accentYellow, "Extract files from a PAK or list its contents"},
 		{"← Back", " ", dimStyle, ""},
 	},
 }
@@ -98,8 +109,8 @@ var jsonMenu = menuDef{
 	title:    "🔄 JSON Conversion",
 	subtitle: "Convert between UAsset and JSON",
 	items: []menuItem{
-		{"UAsset to JSON", "•", accentGreen, "to_json"},
-		{"JSON to UAsset", "•", accentGreen, "from_json"},
+		{"UAsset to JSON", "•", accentGreen, "Convert a binary asset into editable JSON"},
+		{"JSON to UAsset", "•", accentGreen, "Build a binary asset from edited JSON"},
 		{"← Back", " ", dimStyle, ""},
 	},
 }
@@ -108,11 +119,10 @@ var niagaraMenu = menuDef{
 	title:    "✨ Niagara / Other",
 	subtitle: "Niagara assets and batch utilities",
 	items: []menuItem{
-		{"Niagara List", "•", accentMagenta, "niagara_list"},
-		{"Niagara Details", "•", accentMagenta, "niagara_details"},
-		{"Niagara Edit", "•", accentMagenta, "niagara_edit"},
-		{"Modify Colors Batch", "•", accentMagenta, "modify_colors"},
-		{"Scan ChildBP IsEnemy", "•", accentMagenta, "scan_childbp_isenemy"},
+		{"Niagara Details", "•", accentMagenta, "Inspect Niagara color curves and asset details"},
+		{"Niagara Edit", "•", accentMagenta, "Apply JSON-based edits to selected Niagara exports"},
+		{"Niagara Audit", "•", accentMagenta, "Deep-scan Niagara exports for color-related data"},
+		{"Scan ChildBP IsEnemy", "•", accentMagenta, "Scan ChildBP assets for IsEnemy parameter redirects"},
 		{"← Back", " ", dimStyle, ""},
 	},
 }

@@ -27,6 +27,8 @@ func (m model) View() string {
 		return m.viewSettingInput()
 	case viewPreview:
 		return m.viewPreview()
+	case viewPrompt:
+		return m.viewPrompt()
 	default:
 		return m.viewMenu()
 	}
@@ -478,6 +480,54 @@ func (m model) viewPreview() string {
 	b.WriteString("\n\n")
 
 	b.WriteString("  " + keyHint("Y/⏎", "run command") + "    " + keyHint("N/esc", "cancel"))
+	b.WriteString("\n")
+
+	return b.String()
+}
+
+func (m model) viewPrompt() string {
+	var b strings.Builder
+
+	b.WriteString("\n")
+	title := accentYellow.Bold(true).Render("⚠ Update Available")
+	if m.prompt != nil && m.prompt.title != "" {
+		title = accentYellow.Bold(true).Render("⚠ " + m.prompt.title)
+	}
+	b.WriteString(headerBox.Render(title))
+	b.WriteString("\n\n")
+
+	var body strings.Builder
+	if m.prompt != nil {
+		for _, line := range m.prompt.body {
+			body.WriteString(line)
+			body.WriteString("\n")
+		}
+	}
+	b.WriteString(cardBox.Render(strings.TrimSpace(body.String())))
+	b.WriteString("\n\n")
+
+	confirmLabel := "Confirm"
+	cancelLabel := "Cancel"
+	if m.prompt != nil {
+		if m.prompt.confirm != "" {
+			confirmLabel = m.prompt.confirm
+		}
+		if m.prompt.cancel != "" {
+			cancelLabel = m.prompt.cancel
+		}
+	}
+	confirm := "[ " + confirmLabel + " ]"
+	cancel := "[ " + cancelLabel + " ]"
+	if m.promptCursor == 0 {
+		confirm = itemSelected.Render(confirm)
+		cancel = dimStyle.Render(cancel)
+	} else {
+		confirm = dimStyle.Render(confirm)
+		cancel = itemSelected.Render(cancel)
+	}
+	b.WriteString("  " + confirm + "    " + cancel)
+	b.WriteString("\n\n")
+	b.WriteString("  " + keyHint("←→/tab", "choose") + "    " + keyHint("Y/⏎", "confirm") + "    " + keyHint("N/esc", "skip"))
 	b.WriteString("\n")
 
 	return b.String()

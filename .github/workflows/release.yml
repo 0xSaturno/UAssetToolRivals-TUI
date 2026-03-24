@@ -39,6 +39,18 @@ jobs:
         with:
           go-version-file: go.mod
 
+      - name: Resolve version metadata
+        id: version
+        shell: bash
+        run: |
+          if [[ "${GITHUB_REF_TYPE}" == "tag" && -n "${GITHUB_REF_NAME}" ]]; then
+            VERSION="${GITHUB_REF_NAME}"
+          else
+            VERSION="dev-${GITHUB_SHA::7}"
+          fi
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "Resolved version: ${VERSION}"
+
       - name: Build stripped binary
         shell: bash
         env:
@@ -46,7 +58,7 @@ jobs:
           GOARCH: ${{ matrix.goarch }}
           CGO_ENABLED: 0
         run: |
-          go build -trimpath -ldflags='-s -w' -o '${{ matrix.binary_name }}' .
+          go build -trimpath -ldflags="-s -w -X uassettool-tui/app.appVersion=${{ steps.version.outputs.version }}" -o '${{ matrix.binary_name }}' .
 
       - name: Rename release asset
         shell: bash
