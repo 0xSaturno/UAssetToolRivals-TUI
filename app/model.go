@@ -68,7 +68,8 @@ type model struct {
 	dlInfo     *ReleaseInfo
 
 	// preview
-	previewArgs string
+	previewArgs    []string
+	previewCommand string
 
 	// animation
 	spinFrame int

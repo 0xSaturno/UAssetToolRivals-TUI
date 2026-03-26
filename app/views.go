@@ -459,7 +459,7 @@ func (m model) viewPreview() string {
 	b.WriteString(headerBox.Render(title))
 	b.WriteString("\n")
 
-	cmdLine := fmt.Sprintf("UAssetTool.exe %s", m.previewArgs)
+	cmdLine := fmt.Sprintf("UAssetTool.exe %s", m.previewCommand)
 	cardStyle := cardBox
 	innerWidth := 0
 	if m.width > 12 {

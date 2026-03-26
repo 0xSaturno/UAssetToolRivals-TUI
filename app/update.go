@@ -2,6 +2,7 @@ package app
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -178,6 +179,10 @@ func normalizeInputValue(val string) string {
 	return val
 }
 
+func unquoteInputValue(val string) string {
+	return strings.TrimSpace(strings.Trim(val, `"`))
+}
+
 func quoteArg(val string) string {
 	if val == "" {
 		return ""
@@ -188,6 +193,27 @@ func quoteArg(val string) string {
 
 func quotePathArg(val string) string {
 	return quoteArg(normalizeInputValue(val))
+}
+
+func previewArg(val string) string {
+	if val == "" {
+		return `""`
+	}
+	if strings.ContainsAny(val, " \t\n\r\"") {
+		return quoteArg(val)
+	}
+	return val
+}
+
+func buildPreviewCommand(args []string) string {
+	if len(args) == 0 {
+		return ""
+	}
+	previewParts := make([]string, 0, len(args))
+	for _, arg := range args {
+		previewParts = append(previewParts, previewArg(arg))
+	}
+	return strings.Join(previewParts, " ")
 }
 
 func isPathLikeField(label string) bool {
@@ -939,17 +965,20 @@ func (m model) submitForm() (tea.Model, tea.Cmd) {
 		}
 	}
 
-	args := m.buildArgs()
+	args := m.buildArgList()
+	preview := buildPreviewCommand(args)
 
 	if m.config.PreviewCommand {
 		m.state = viewPreview
 		m.previewArgs = args
+		m.previewCommand = preview
 		return m, nil
 	}
 
 	m.state = viewRunning
 	m.status = "Running..."
 	m.runningOutput = ""
+	m.runningScroll = -1
 	return m, tea.Batch(spinTick(), func() tea.Msg {
 		out, err := runTool(args)
 		return toolDoneMsg{out, err}
@@ -957,7 +986,7 @@ func (m model) submitForm() (tea.Model, tea.Cmd) {
 }
 
 func rawInputValue(val string) string {
-	return strings.TrimSpace(strings.Trim(val, `"`))
+	return strings.TrimSpace(val)
 }
 
 func splitMultiValueInput(val string) []string {
@@ -968,9 +997,47 @@ func splitMultiValueInput(val string) []string {
 	return splitArgs(val)
 }
 
-func (m model) buildArgs() string {
+func splitPathListInput(val string) []string {
+	val = strings.TrimSpace(val)
+	if val == "" {
+		return nil
+	}
+
+	normalizedWhole := normalizeInputValue(rawInputValue(val))
+	if normalizedWhole != "" {
+		if _, err := os.Stat(normalizedWhole); err == nil {
+			return []string{normalizedWhole}
+		}
+	}
+
+	if strings.Contains(val, "\n") || strings.Contains(val, "\r") {
+		var items []string
+		for _, line := range strings.FieldsFunc(val, func(r rune) bool {
+			return r == '\n' || r == '\r'
+		}) {
+			item := normalizeInputValue(unquoteInputValue(line))
+			if item != "" {
+				items = append(items, item)
+			}
+		}
+		if len(items) > 0 {
+			return items
+		}
+	}
+
+	var result []string
+	for _, item := range splitArgs(val) {
+		normalized := normalizeInputValue(unquoteInputValue(item))
+		if normalized != "" {
+			result = append(result, normalized)
+		}
+	}
+	return result
+}
+
+func (m model) buildArgList() []string {
 	if m.form == nil {
-		return ""
+		return nil
 	}
 	var parts []string
 	parts = append(parts, m.form.command)
@@ -1045,7 +1112,7 @@ func (m model) buildArgs() string {
 		switch m.form.command {
 		case "detect", "fix":
 			if i == 1 {
-				parts = append(parts, quotePathArg(val))
+				parts = append(parts, val)
 				continue
 			}
 		case "inject_texture", "batch_inject_texture":
@@ -1054,7 +1121,7 @@ func (m model) buildArgs() string {
 				continue
 			}
 			if i == 5 {
-				parts = append(parts, "--usmap", quotePathArg(val))
+				parts = append(parts, "--usmap", val)
 				continue
 			}
 		case "extract_texture":
@@ -1067,52 +1134,52 @@ func (m model) buildArgs() string {
 				continue
 			}
 			if i == 4 {
-				parts = append(parts, "--usmap", quotePathArg(val))
+				parts = append(parts, "--usmap", val)
 				continue
 			}
 		case "create_mod_iostore":
 			if i == 1 {
-				parts = append(parts, "--mount-point", quoteArg(val))
+				parts = append(parts, "--mount-point", val)
 				continue
 			}
 			if i == 2 {
-				parts = append(parts, "--game-path", quoteArg(val))
+				parts = append(parts, "--game-path", val)
 				continue
 			}
 			if i == 6 {
-				parts = append(parts, "--pak-aes", quoteArg(val))
+				parts = append(parts, "--pak-aes", val)
 				continue
 			}
 			if i == 3 {
 				for _, item := range splitMultiValueInput(rawVal) {
-					parts = append(parts, quotePathArg(item))
+					parts = append(parts, normalizeInputValue(rawInputValue(item)))
 				}
 				continue
 			}
 		case "create_iostore_bundle":
 			if i == 1 {
 				for _, item := range splitMultiValueInput(rawVal) {
-					parts = append(parts, quotePathArg(item))
+					parts = append(parts, normalizeInputValue(rawInputValue(item)))
 				}
 				continue
 			}
 			if i == 2 {
-				parts = append(parts, "--mount-point", quoteArg(val))
+				parts = append(parts, "--mount-point", val)
 				continue
 			}
 			if i == 5 {
-				parts = append(parts, "--aes-key", quoteArg(val))
+				parts = append(parts, "--aes-key", val)
 				continue
 			}
 		case "create_companion_pak":
 			if i == 1 {
 				for _, item := range splitMultiValueInput(rawVal) {
-					parts = append(parts, quoteArg(item))
+					parts = append(parts, rawInputValue(item))
 				}
 				continue
 			}
 			if i == 2 {
-				parts = append(parts, "--mount-point", quoteArg(val))
+				parts = append(parts, "--mount-point", val)
 				continue
 			}
 			if i == 3 {
@@ -1120,12 +1187,12 @@ func (m model) buildArgs() string {
 				continue
 			}
 			if i == 4 {
-				parts = append(parts, "--aes-key", quoteArg(val))
+				parts = append(parts, "--aes-key", val)
 				continue
 			}
 		case "extract_iostore":
 			if i == 2 {
-				parts = append(parts, "--package", quoteArg(rawVal))
+				parts = append(parts, "--package", rawVal)
 				continue
 			}
 			if i == 3 {
@@ -1133,110 +1200,110 @@ func (m model) buildArgs() string {
 				continue
 			}
 			if i == 4 {
-				parts = append(parts, "--aes", quoteArg(val))
+				parts = append(parts, "--aes", val)
 				continue
 			}
 		case "extract_pak":
 			if i == 2 {
-				parts = append(parts, "--aes", quoteArg(val))
+				parts = append(parts, "--aes", val)
 				continue
 			}
 			if i == 4 {
 				parts = append(parts, "--filter")
 				for _, item := range splitMultiValueInput(rawVal) {
-					parts = append(parts, quoteArg(item))
+					parts = append(parts, rawInputValue(item))
 				}
 				continue
 			}
 		case "extract_iostore_legacy":
 			if i == 2 {
 				parts = append(parts, "--mod")
-				for _, item := range splitMultiValueInput(rawVal) {
-					parts = append(parts, quotePathArg(item))
+				for _, item := range splitPathListInput(rawVal) {
+					parts = append(parts, item)
 				}
 				continue
 			}
 			if i == 3 {
 				parts = append(parts, "--filter")
 				for _, item := range splitMultiValueInput(rawVal) {
-					parts = append(parts, quoteArg(item))
+					parts = append(parts, rawInputValue(item))
 				}
 				continue
 			}
 			if i == 4 {
-				parts = append(parts, "--aes", quoteArg(val))
+				parts = append(parts, "--aes", val)
 				continue
 			}
 		case "create_pak":
 			if i == 1 {
 				for _, item := range splitMultiValueInput(rawVal) {
-					parts = append(parts, quotePathArg(item))
+					parts = append(parts, normalizeInputValue(rawInputValue(item)))
 				}
 				continue
 			}
 			if i == 2 {
-				parts = append(parts, "--mount-point", quoteArg(val))
+				parts = append(parts, "--mount-point", val)
 				continue
 			}
 		case "list_iostore":
 			if i == 1 {
-				parts = append(parts, "--aes", quoteArg(val))
+				parts = append(parts, "--aes", val)
 				continue
 			}
 			if i == 2 {
-				parts = append(parts, "--filter", quoteArg(rawVal))
+				parts = append(parts, "--filter", rawVal)
 				continue
 			}
 		case "dump_zen_from_game":
 			if i == 1 {
-				parts = append(parts, quoteArg(rawVal))
+				parts = append(parts, rawVal)
 				continue
 			}
 		case "scan_childbp_isenemy":
 			if i == 1 {
-				parts = append(parts, "--aes", quoteArg(val))
+				parts = append(parts, "--aes", val)
 				continue
 			}
 		case "niagara_details":
 			if i == 1 {
-				parts = append(parts, "--usmap", quotePathArg(val))
+				parts = append(parts, "--usmap", val)
 				continue
 			}
 		case "niagara_edit":
 			if i == 1 {
-				parts = append(parts, "--usmap", quotePathArg(val))
+				parts = append(parts, "--usmap", val)
 				continue
 			}
 			if i == 2 {
-				parts = append(parts, "--output", quotePathArg(val))
+				parts = append(parts, "--output", val)
 				continue
 			}
 			if i == 3 {
-				parts = append(parts, "--edits", quoteArg(rawVal))
+				parts = append(parts, "--edits", rawVal)
 				continue
 			}
 			if i == 4 {
-				parts = append(parts, "--edits-file", quotePathArg(val))
+				parts = append(parts, "--edits-file", val)
 				continue
 			}
 		case "niagara_audit":
 			if i == 1 {
-				parts = append(parts, quotePathArg(val))
+				parts = append(parts, val)
 				continue
 			}
 		}
 		if shouldQuoteField(f, m.form.command, i) {
 			if isPathLikeField(f.label) {
-				parts = append(parts, quotePathArg(val))
+				parts = append(parts, val)
 			} else {
-				parts = append(parts, quoteArg(val))
+				parts = append(parts, rawVal)
 			}
 		} else {
 			parts = append(parts, val)
 		}
 	}
 
-	return strings.Join(parts, " ")
+	return parts
 }
 
 // ── settings handling ───────────────────────────────────────────────────────

@@ -375,14 +375,19 @@ func extractToolArchive(archivePath, target, sourceURL string) error {
 	return extractToolFromZip(archivePath, target)
 }
 
-func runTool(args string) (string, error) {
+func runTool(args []string) (string, error) {
 	exe := exePath()
 	if _, err := os.Stat(exe); os.IsNotExist(err) {
 		return "", fmt.Errorf("%s not found. Please download it first", filepath.Base(exe))
 	}
 
-	cmd := exec.Command(exe)
-	cmd.Args = append([]string{exe}, splitArgs(args)...)
+	fmt.Println("[debug] runTool exe:", exe)
+	fmt.Println("[debug] runTool argc:", len(args))
+	for i, arg := range args {
+		fmt.Printf("[debug] runTool argv[%d]: %s\n", i, arg)
+	}
+
+	cmd := exec.Command(exe, args...)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return "", err
