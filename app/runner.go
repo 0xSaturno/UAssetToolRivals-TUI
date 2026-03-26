@@ -381,12 +381,6 @@ func runTool(args []string) (string, error) {
 		return "", fmt.Errorf("%s not found. Please download it first", filepath.Base(exe))
 	}
 
-	fmt.Println("[debug] runTool exe:", exe)
-	fmt.Println("[debug] runTool argc:", len(args))
-	for i, arg := range args {
-		fmt.Printf("[debug] runTool argv[%d]: %s\n", i, arg)
-	}
-
 	cmd := exec.Command(exe, args...)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
