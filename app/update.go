@@ -183,6 +183,16 @@ func unquoteInputValue(val string) string {
 	return strings.TrimSpace(strings.Trim(val, `"`))
 }
 
+// aesKeyArg hands UAssetTool bare hex: extract_iostore passes the key straight
+// to Convert.FromHexString, which throws on a 0x prefix.
+func aesKeyArg(val string) string {
+	val = unquoteInputValue(val)
+	if len(val) > 2 && (strings.HasPrefix(val, "0x") || strings.HasPrefix(val, "0X")) {
+		val = val[2:]
+	}
+	return val
+}
+
 func quoteArg(val string) string {
 	if val == "" {
 		return ""
@@ -229,14 +239,20 @@ func shouldQuoteField(f formField, command string, index int) bool {
 	case "create_mod_iostore":
 		return index == 0 || index == 1 || index == 2 || index == 3 || index == 6
 	case "extract_iostore_legacy":
-		return index == 0 || index == 1 || index == 2 || index == 3
+		return index == 0 || index == 1 || index == 2 || index == 3 || index == 5
 	case "extract_pak":
 		return index != 4
 	case "create_pak":
-		return index == 0 || index == 2
+		return index == 0 || index == 1 || index == 2 || index == 3
 	case "create_companion_pak":
 		return index == 0
-	case "to_json", "from_json", "batch_detect", "dump", "skeletal_mesh_info", "to_zen", "niagara_list", "niagara_details", "modify_colors", "scan_childbp_isenemy", "extract_script_objects", "inspect_zen", "is_iostore_compressed", "is_iostore_encrypted", "recompress_iostore", "detect", "fix":
+	case "list_iostore":
+		return index == 0 || index == 5 || index == 6
+	case "list_pak":
+		return index == 0
+	case "parse_locres":
+		return index == 0 || index == 1
+	case "to_json", "from_json", "batch_detect", "dump", "skeletal_mesh_info", "to_zen", "niagara_list", "niagara_details", "modify_colors", "extract_script_objects", "inspect_zen", "is_iostore_compressed", "is_iostore_encrypted", "recompress_iostore", "detect", "fix":
 		return true
 	}
 	return false
@@ -259,17 +275,18 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case updateCheckMsg:
 		m.startupChecks = true
+		m.applyToolVersion(msg.state)
 		if msg.err != nil {
-			fmt.Println("[debug] auto update check completed with partial/full error:", msg.err)
+			debugln("auto update check completed with partial/full error:", msg.err)
 			m.status = "Update check failed: " + msg.err.Error()
 		} else {
-			fmt.Println("[debug] auto update check completed successfully")
+			debugln("auto update check completed successfully")
 		}
 		m.queueUpdatePrompts(msg.state)
 		return m.showNextPrompt()
 
 	case updatePromptResultMsg:
-		fmt.Println("[debug] update prompt result:", msg.action, msg.text, msg.err)
+		debugln("update prompt result:", msg.action, msg.text, msg.err)
 		if msg.action == "update-uat" && msg.err == nil && msg.text == "run-uat-update" {
 			m.prompt = nil
 			m.promptCursor = 0
@@ -357,6 +374,24 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.config.ToolVersion = msg.info.TagName
 				saveConfig(m.config)
 			}
+			// re-read the version from the binary we just installed
+			m.uatMissing = false
+			if info, err := detectToolVersion(); err == nil {
+				if info.stamped {
+					m.uatVersion = info.version
+					m.uatVersionNote = ""
+					if normalizeVersionTag(m.config.ToolVersion) != normalizeVersionTag(info.version) {
+						m.config.ToolVersion = info.version
+						saveConfig(m.config)
+					}
+				} else {
+					m.uatVersion = m.config.ToolVersion
+					m.uatVersionNote = "(build not version-stamped; tag from last download)"
+				}
+			} else {
+				debugln("post-download --version failed:", err)
+				m.uatVersion = m.config.ToolVersion
+			}
 		}
 		m.outputScroll = -1
 		return m, nil
@@ -382,15 +417,44 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// applyToolVersion records what --version reported, so the menu and the update
+// prompt describe the binary that is actually installed.
+func (m *model) applyToolVersion(state updateCheckState) {
+	switch {
+	case state.UATVersionErr != "":
+		if _, err := os.Stat(exePath()); err != nil {
+			// no binary: say so instead of showing a stale tag
+			m.uatMissing = true
+			m.uatVersion = ""
+			m.uatVersionNote = ""
+			break
+		}
+		m.uatMissing = false
+		m.uatVersion = ""
+		m.uatVersionNote = "(version unreadable)"
+	case state.UATVersionStamped:
+		m.uatMissing = false
+		m.uatVersion = state.UATCurrentVersion
+		m.uatVersionNote = ""
+		if normalizeVersionTag(m.config.ToolVersion) != normalizeVersionTag(state.UATCurrentVersion) {
+			m.config.ToolVersion = state.UATCurrentVersion
+			if err := saveConfig(m.config); err != nil {
+				debugln("saving detected tool version failed:", err)
+			}
+		}
+	default:
+		// unstamped, so the recorded tag is the best we have — and we say so
+		m.uatMissing = false
+		m.uatVersion = state.UATCurrentVersion
+		m.uatVersionNote = "(build not version-stamped; tag from last download)"
+	}
+}
+
 func (m *model) queueUpdatePrompts(state updateCheckState) {
 	if state.UATNeedsUpdate && state.UATLatest != nil {
 		m.updateQueue = append(m.updateQueue, updatePromptSpec{
-			title: "UAssetTool Update Available",
-			body: []string{
-				fmt.Sprintf("Installed UAT: %s", blankVersionFallback(state.UATCurrentVersion)),
-				fmt.Sprintf("Latest UAT: %s", blankVersionFallback(state.UATLatest.TagName)),
-				"Run the UAT update command now?",
-			},
+			title:    "UAssetTool Update Available",
+			body:     uatPromptBody(state),
 			action:   "update-uat",
 			confirm:  "Update UAT",
 			cancel:   "Skip",
@@ -418,6 +482,23 @@ func (m *model) queueUpdatePrompts(state updateCheckState) {
 	}
 }
 
+// uatPromptBody says where the installed version came from.
+func uatPromptBody(state updateCheckState) []string {
+	source := "recorded at last download"
+	if state.UATVersionStamped {
+		source = "reported by UAssetTool --version"
+	} else if state.UATVersionErr != "" {
+		source = "recorded at last download; --version unavailable"
+	} else if state.UATReportedVersion != "" {
+		source = "recorded at last download; this build is not version-stamped"
+	}
+	return []string{
+		fmt.Sprintf("Installed UAT: %s (%s)", blankVersionFallback(state.UATCurrentVersion), source),
+		fmt.Sprintf("Latest UAT: %s", blankVersionFallback(state.UATLatest.TagName)),
+		"Run the UAT update command now?",
+	}
+}
+
 func blankVersionFallback(v string) string {
 	v = strings.TrimSpace(v)
 	if v == "" {
@@ -441,7 +522,7 @@ func (m model) showNextPrompt() (tea.Model, tea.Cmd) {
 
 func (m model) dismissPrompt() (tea.Model, tea.Cmd) {
 	if m.prompt != nil {
-		fmt.Println("[debug] update prompt dismissed:", m.prompt.action)
+		debugln("update prompt dismissed:", m.prompt.action)
 	}
 	m.prompt = nil
 	m.promptCursor = 0
@@ -1070,6 +1151,10 @@ func (m model) buildArgList() []string {
 					if strings.EqualFold(val, "y") {
 						parts = append(parts, "--no-material-tags")
 					}
+				case 8:
+					if strings.EqualFold(val, "y") {
+						parts = append(parts, "--hybrid")
+					}
 				}
 			case "create_iostore_bundle":
 				switch i {
@@ -1085,26 +1170,32 @@ func (m model) buildArgList() []string {
 					}
 				}
 			case "extract_iostore_legacy":
-				if i == 5 && strings.EqualFold(val, "y") {
+				if i == 6 && strings.EqualFold(val, "y") {
 					parts = append(parts, "--with-deps")
 				}
-			case "create_pak":
-				if strings.EqualFold(val, "y") {
-					parts = append(parts, "--compress")
-				} else {
-					parts = append(parts, "--no-compress")
+			case "list_iostore":
+				if i == 4 && strings.EqualFold(val, "y") {
+					parts = append(parts, "--types")
 				}
 			case "extract_pak":
 				if i == 3 && strings.EqualFold(val, "y") {
 					parts = append(parts, "--list")
 				}
 			case "inject_texture", "batch_inject_texture":
-				if i == 4 && strings.EqualFold(val, "y") {
+				if i == 3 && strings.EqualFold(val, "y") {
 					parts = append(parts, "--no-mips")
 				}
-			case "scan_childbp_isenemy":
-				if strings.EqualFold(val, "y") {
-					parts = append(parts, "--extracted")
+			case "to_json":
+				if i == 3 && strings.EqualFold(val, "y") {
+					parts = append(parts, "--compact")
+				}
+			case "list_pak":
+				if i == 2 && strings.EqualFold(val, "y") {
+					parts = append(parts, "--paths-only")
+				}
+			case "parse_locres":
+				if i == 5 && strings.EqualFold(val, "y") {
+					parts = append(parts, "--stats")
 				}
 			}
 			continue
@@ -1116,15 +1207,11 @@ func (m model) buildArgList() []string {
 				continue
 			}
 		case "inject_texture", "batch_inject_texture":
-			if i == 3 {
-				parts = append(parts, "--format", val)
-				continue
-			}
-			if i == 5 {
+			if i == 4 {
 				parts = append(parts, "--usmap", val)
 				continue
 			}
-		case "extract_texture":
+		case "extract_texture", "batch_extract_texture":
 			if i == 2 {
 				parts = append(parts, "--format", strings.ToUpper(rawVal))
 				continue
@@ -1139,20 +1226,20 @@ func (m model) buildArgList() []string {
 			}
 		case "create_mod_iostore":
 			if i == 1 {
-				parts = append(parts, "--mount-point", val)
+				parts = append(parts, "--mount-point", unquoteInputValue(rawVal))
 				continue
 			}
 			if i == 2 {
-				parts = append(parts, "--game-path", val)
+				parts = append(parts, "--game-path", unquoteInputValue(rawVal))
 				continue
 			}
 			if i == 6 {
-				parts = append(parts, "--pak-aes", val)
+				parts = append(parts, "--pak-aes", aesKeyArg(rawVal))
 				continue
 			}
 			if i == 3 {
-				for _, item := range splitMultiValueInput(rawVal) {
-					parts = append(parts, normalizeInputValue(rawInputValue(item)))
+				for _, item := range splitPathListInput(rawVal) {
+					parts = append(parts, item)
 				}
 				continue
 			}
@@ -1164,11 +1251,11 @@ func (m model) buildArgList() []string {
 				continue
 			}
 			if i == 2 {
-				parts = append(parts, "--mount-point", val)
+				parts = append(parts, "--mount-point", unquoteInputValue(rawVal))
 				continue
 			}
 			if i == 5 {
-				parts = append(parts, "--aes-key", val)
+				parts = append(parts, "--aes-key", aesKeyArg(rawVal))
 				continue
 			}
 		case "create_companion_pak":
@@ -1179,7 +1266,7 @@ func (m model) buildArgList() []string {
 				continue
 			}
 			if i == 2 {
-				parts = append(parts, "--mount-point", val)
+				parts = append(parts, "--mount-point", unquoteInputValue(rawVal))
 				continue
 			}
 			if i == 3 {
@@ -1187,7 +1274,7 @@ func (m model) buildArgList() []string {
 				continue
 			}
 			if i == 4 {
-				parts = append(parts, "--aes-key", val)
+				parts = append(parts, "--aes-key", aesKeyArg(rawVal))
 				continue
 			}
 		case "extract_iostore":
@@ -1200,12 +1287,12 @@ func (m model) buildArgList() []string {
 				continue
 			}
 			if i == 4 {
-				parts = append(parts, "--aes", val)
+				parts = append(parts, "--aes", aesKeyArg(rawVal))
 				continue
 			}
 		case "extract_pak":
 			if i == 2 {
-				parts = append(parts, "--aes", val)
+				parts = append(parts, "--aes", aesKeyArg(rawVal))
 				continue
 			}
 			if i == 4 {
@@ -1231,27 +1318,84 @@ func (m model) buildArgList() []string {
 				continue
 			}
 			if i == 4 {
-				parts = append(parts, "--aes", val)
+				parts = append(parts, "--aes", aesKeyArg(rawVal))
+				continue
+			}
+			if i == 5 {
+				// one path per --container flag
+				for _, item := range splitPathListInput(rawVal) {
+					parts = append(parts, "--container", item)
+				}
 				continue
 			}
 		case "create_pak":
 			if i == 1 {
-				for _, item := range splitMultiValueInput(rawVal) {
-					parts = append(parts, normalizeInputValue(rawInputValue(item)))
-				}
+				parts = append(parts, "--root", val)
 				continue
 			}
 			if i == 2 {
-				parts = append(parts, "--mount-point", val)
+				for _, item := range splitPathListInput(rawVal) {
+					parts = append(parts, item)
+				}
+				continue
+			}
+			if i == 3 {
+				parts = append(parts, "--mount-point", unquoteInputValue(rawVal))
+				continue
+			}
+			if i == 4 {
+				parts = append(parts, "--aes-key", aesKeyArg(rawVal))
+				continue
+			}
+		case "list_pak":
+			if i == 1 {
+				parts = append(parts, "--aes", aesKeyArg(rawVal))
+				continue
+			}
+			if i == 3 {
+				parts = append(parts, "--filter")
+				for _, item := range splitMultiValueInput(rawVal) {
+					parts = append(parts, rawInputValue(item))
+				}
+				continue
+			}
+		case "parse_locres":
+			// namespace, key and search are literal strings, not paths
+			if i == 1 {
+				parts = append(parts, "--output", val)
+				continue
+			}
+			if i == 2 {
+				parts = append(parts, "--namespace", unquoteInputValue(rawVal))
+				continue
+			}
+			if i == 3 {
+				parts = append(parts, "--key", unquoteInputValue(rawVal))
+				continue
+			}
+			if i == 4 {
+				parts = append(parts, "--search", unquoteInputValue(rawVal))
 				continue
 			}
 		case "list_iostore":
 			if i == 1 {
-				parts = append(parts, "--aes", val)
+				parts = append(parts, "--aes", aesKeyArg(rawVal))
 				continue
 			}
 			if i == 2 {
 				parts = append(parts, "--filter", rawVal)
+				continue
+			}
+			if i == 3 {
+				parts = append(parts, "--type", rawVal)
+				continue
+			}
+			if i == 5 {
+				parts = append(parts, "--script-objects", val)
+				continue
+			}
+			if i == 6 {
+				parts = append(parts, "--game-paks", val)
 				continue
 			}
 		case "dump_zen_from_game":
@@ -1259,11 +1403,9 @@ func (m model) buildArgList() []string {
 				parts = append(parts, rawVal)
 				continue
 			}
-		case "scan_childbp_isenemy":
-			if i == 1 {
-				parts = append(parts, "--aes", val)
-				continue
-			}
+		case "cityhash":
+			parts = append(parts, unquoteInputValue(rawVal))
+			continue
 		case "niagara_details":
 			if i == 1 {
 				parts = append(parts, "--usmap", val)

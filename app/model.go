@@ -1,7 +1,6 @@
 package app
 
 import (
-	"fmt"
 	"time"
 
 	"github.com/charmbracelet/bubbles/textinput"
@@ -78,6 +77,11 @@ type model struct {
 	prompt        *updatePromptSpec
 	promptCursor  int
 	startupChecks bool
+
+	// installed UAssetTool version, per `UAssetTool --version`
+	uatVersion     string
+	uatVersionNote string
+	uatMissing     bool
 }
 
 // ── messages ────────────────────────────────────────────────────────────────
@@ -123,12 +127,15 @@ type updatePromptSpec struct {
 }
 
 type updateCheckState struct {
-	UATCurrentVersion string
-	UATLatest         *ReleaseInfo
-	UATNeedsUpdate    bool
-	TUICurrentVersion string
-	TUILatest         *ReleaseInfo
-	TUINeedsUpdate    bool
+	UATCurrentVersion  string
+	UATLatest          *ReleaseInfo
+	UATNeedsUpdate     bool
+	UATReportedVersion string // raw `--version` line, empty if unqueryable
+	UATVersionStamped  bool
+	UATVersionErr      string
+	TUICurrentVersion  string
+	TUILatest          *ReleaseInfo
+	TUINeedsUpdate     bool
 }
 
 func spinTick() tea.Cmd {
@@ -149,7 +156,7 @@ func initialModel() model {
 }
 
 func (m model) Init() tea.Cmd {
-	fmt.Println("[debug] initializing TUI model")
+	debugln("initializing TUI model")
 	return tea.Batch(
 		tea.SetWindowTitle("UAssetTool Manager"),
 		autoCheckUpdatesCmd(m.config),
@@ -161,7 +168,7 @@ func (m model) Init() tea.Cmd {
 func (m model) currentMenu() menuDef {
 	switch m.state {
 	case viewMain:
-		return mainMenuDef(m.config.ToolVersion)
+		return mainMenuDef(m.installedToolVersion(), m.uatVersionNote)
 	case viewCategory:
 		return categoryMenu
 	case viewAssetOps:
@@ -177,8 +184,20 @@ func (m model) currentMenu() menuDef {
 	case viewSettings:
 		return settingsMenuDef(m.config)
 	default:
-		return mainMenuDef(m.config.ToolVersion)
+		return mainMenuDef(m.installedToolVersion(), m.uatVersionNote)
 	}
+}
+
+// installedToolVersion prefers what the binary reported; the recorded download
+// tag goes stale whenever the exe is replaced by hand.
+func (m model) installedToolVersion() string {
+	if m.uatMissing {
+		return ""
+	}
+	if m.uatVersion != "" {
+		return m.uatVersion
+	}
+	return m.config.ToolVersion
 }
 
 func (m model) getConfigVal(key string) string {

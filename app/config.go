@@ -2,7 +2,6 @@ package app
 
 import (
 	"encoding/json"
-	"fmt"
 	"os"
 	"path/filepath"
 )
@@ -26,11 +25,11 @@ func loadConfig() Config {
 	var cfg Config
 	data, err := os.ReadFile(configPath())
 	if err != nil {
-		fmt.Println("[debug] loadConfig read skipped:", err)
+		debugln("loadConfig read skipped:", err)
 		return cfg
 	}
 	if err := json.Unmarshal(data, &cfg); err != nil {
-		fmt.Println("[debug] loadConfig unmarshal failed:", err)
+		debugln("loadConfig unmarshal failed:", err)
 	}
 	return cfg
 }

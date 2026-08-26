@@ -6,6 +6,7 @@ import (
 	"bufio"
 	"bytes"
 	"compress/gzip"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -13,6 +14,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"runtime/debug"
 	"strconv"
@@ -36,7 +38,7 @@ var runningCmdMu sync.Mutex
 var runningCmd *exec.Cmd
 
 func Run() {
-	fmt.Println("[debug] app version:", currentTUIVersion())
+	debugln("app version:", currentTUIVersion())
 	p := tea.NewProgram(
 		initialModel(),
 		tea.WithAltScreen(),
@@ -100,13 +102,67 @@ func currentTUIVersion() string {
 	}
 	info, ok := debug.ReadBuildInfo()
 	if !ok {
-		fmt.Println("[debug] ReadBuildInfo unavailable")
+		debugln("ReadBuildInfo unavailable")
 		return "dev"
 	}
 	if info != nil && info.Main.Version != "" && info.Main.Version != "(devel)" {
 		return info.Main.Version
 	}
 	return "dev"
+}
+
+// ── installed UAssetTool version ────────────────────────────────────────────
+
+// unstampedToolVersion is the csproj placeholder. The upstream release workflow
+// never overrides it, so every published binary reports it whatever the tag.
+const unstampedToolVersion = "1.0.0"
+
+// matches the `UAssetTool v<semver>[+<metadata>]` line --version prints
+var toolVersionOutput = regexp.MustCompile(`(?im)^\s*UAssetTool\s+v?([0-9][^\s+]*)(?:\+(\S+))?\s*$`)
+
+type toolVersionInfo struct {
+	raw     string // the line as printed
+	version string // semver only, e.g. "1.5.6"
+	commit  string // build metadata after '+'
+	stamped bool   // false for the unstamped placeholder
+}
+
+// detectToolVersion asks the binary itself, which stays correct when the exe
+// was replaced by hand.
+func detectToolVersion() (toolVersionInfo, error) {
+	exe := exePath()
+	if _, err := os.Stat(exe); err != nil {
+		return toolVersionInfo{}, fmt.Errorf("%s not found", filepath.Base(exe))
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, exe, "--version")
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return toolVersionInfo{}, fmt.Errorf("--version failed: %w", err)
+	}
+
+	out := stdout.String()
+	if strings.TrimSpace(out) == "" {
+		out = stderr.String()
+	}
+
+	match := toolVersionOutput.FindStringSubmatch(out)
+	if match == nil {
+		return toolVersionInfo{}, fmt.Errorf("could not parse --version output: %q", strings.TrimSpace(out))
+	}
+
+	info := toolVersionInfo{
+		raw:     strings.TrimSpace(match[0]),
+		version: match[1],
+		commit:  match[2],
+	}
+	info.stamped = normalizeVersionTag(info.version) != unstampedToolVersion
+	return info, nil
 }
 
 func normalizeVersionTag(v string) string {
@@ -496,7 +552,7 @@ func fetchTUIReleaseInfo() (*ReleaseInfo, error) {
 }
 
 func fetchReleaseInfoFromURL(apiURL string) (*ReleaseInfo, error) {
-	fmt.Println("[debug] fetching release info:", apiURL)
+	debugln("fetching release info:", apiURL)
 	req, err := http.NewRequest("GET", apiURL, nil)
 	if err != nil {
 		return nil, err
@@ -516,7 +572,7 @@ func fetchReleaseInfoFromURL(apiURL string) (*ReleaseInfo, error) {
 		message := strings.TrimSpace(string(body))
 		remaining := strings.TrimSpace(resp.Header.Get("X-RateLimit-Remaining"))
 		reset := strings.TrimSpace(resp.Header.Get("X-RateLimit-Reset"))
-		fmt.Println("[debug] GitHub API failure:", resp.StatusCode, "remaining=", remaining, "reset=", reset, "body=", message)
+		debugln("GitHub API failure:", resp.StatusCode, "remaining=", remaining, "reset=", reset, "body=", message)
 
 		if resp.StatusCode == http.StatusForbidden {
 			if remaining == "0" {
@@ -541,32 +597,53 @@ func fetchReleaseInfoFromURL(apiURL string) (*ReleaseInfo, error) {
 	if err := json.NewDecoder(resp.Body).Decode(&info); err != nil {
 		return nil, err
 	}
-	fmt.Println("[debug] release info fetched:", info.TagName, info.Name)
+	debugln("release info fetched:", info.TagName, info.Name)
 	return &info, nil
 }
 
 func autoCheckUpdatesCmd(cfg Config) tea.Cmd {
 	return func() tea.Msg {
-		fmt.Println("[debug] auto update check starting")
+		debugln("auto update check starting")
 		state := updateCheckState{
 			UATCurrentVersion: cfg.ToolVersion,
 			TUICurrentVersion: currentTUIVersion(),
 		}
+
+		// Ask the binary rather than trusting the recorded download tag.
+		toolInfo, toolErr := detectToolVersion()
+		switch {
+		case toolErr != nil:
+			state.UATVersionErr = toolErr.Error()
+			debugln("UAT --version failed:", toolErr)
+		case toolInfo.stamped:
+			state.UATCurrentVersion = toolInfo.version
+			state.UATVersionStamped = true
+			state.UATReportedVersion = toolInfo.raw
+			debugln("UAT --version reported:", toolInfo.raw)
+		default:
+			// --version cannot tell releases apart here; keep the recorded tag.
+			state.UATReportedVersion = toolInfo.raw
+			if normalizeVersionTag(cfg.ToolVersion) == "" {
+				state.UATCurrentVersion = toolInfo.version
+			}
+			debugln("UAT --version unstamped:", toolInfo.raw, "using:", state.UATCurrentVersion)
+		}
+
 		uatInfo, uatErr := fetchReleaseInfo()
 		if uatErr != nil {
-			fmt.Println("[debug] UAT update check failed:", uatErr)
+			debugln("UAT update check failed:", uatErr)
 		} else {
 			state.UATLatest = uatInfo
-			state.UATNeedsUpdate = isVersionNewer(cfg.ToolVersion, uatInfo.TagName)
-			fmt.Println("[debug] UAT current/latest/update:", cfg.ToolVersion, uatInfo.TagName, state.UATNeedsUpdate)
+			state.UATNeedsUpdate = isVersionNewer(state.UATCurrentVersion, uatInfo.TagName)
+			debugln("UAT current/latest/update:", state.UATCurrentVersion, uatInfo.TagName, state.UATNeedsUpdate)
 		}
 		tuiInfo, tuiErr := fetchTUIReleaseInfo()
 		if tuiErr != nil {
-			fmt.Println("[debug] TUI update check failed:", tuiErr)
+			debugln("TUI update check failed:", tuiErr)
 		} else {
 			state.TUILatest = tuiInfo
 			state.TUINeedsUpdate = isVersionNewer(state.TUICurrentVersion, tuiInfo.TagName)
-			fmt.Println("[debug] TUI current/latest/update:", state.TUICurrentVersion, tuiInfo.TagName, state.TUINeedsUpdate)
+			debugln("TUI current/latest/update:", state.TUICurrentVersion, tuiInfo.TagName, state.TUINeedsUpdate)
 		}
 		if uatErr != nil && tuiErr != nil {
 			return updateCheckMsg{state: state, err: fmt.Errorf("UAT: %v | TUI: %v", uatErr, tuiErr)}
@@ -582,24 +659,22 @@ func launchWindowsSelfReplace(currentExe, tmpNew, tmpBak string) error {
 		return err
 	}
 	scriptPath := script.Name()
+	// This runs in the console the TUI is exiting from, so it stays silent.
 	scriptBody := fmt.Sprintf(`@echo off
 setlocal enableextensions
-echo [debug] self-update helper started for PID %d
 :wait_for_exit
 tasklist /FI "PID eq %d" 2>nul | find "%d" >nul
 if not errorlevel 1 (
   ping 127.0.0.1 -n 2 > nul
   goto wait_for_exit
 )
-echo [debug] current process exited, replacing executable
 if exist %q del /F /Q %q > nul 2>nul
 move /Y %q %q > nul
 if errorlevel 1 (
-  echo [debug] failed to rename current exe to backup
+  rem could not rename current exe to backup
 )
 move /Y %q %q > nul
 if errorlevel 1 (
-  echo [debug] failed to promote new exe
   exit /b 1
 )
 start "" %q
@@ -614,7 +689,7 @@ ping 127.0.0.1 -n 2 > nul
 goto cleanup_backup
 :cleanup_done
 del /F /Q %q > nul 2>nul
-`, currentPID, currentPID, currentPID, tmpBak, tmpBak, currentExe, tmpBak, tmpNew, currentExe, currentExe, tmpBak, tmpBak, tmpBak, scriptPath)
+`, currentPID, currentPID, tmpBak, tmpBak, currentExe, tmpBak, tmpNew, currentExe, currentExe, tmpBak, tmpBak, tmpBak, scriptPath)
 	if _, err := script.WriteString(scriptBody); err != nil {
 		script.Close()
 		return err
@@ -623,7 +698,7 @@ del /F /Q %q > nul 2>nul
 		return err
 	}
 	cmd := exec.Command("cmd", "/C", scriptPath)
-	fmt.Println("[debug] launching Windows self-update helper:", scriptPath)
+	debugln("launching Windows self-update helper:", scriptPath)
 	if err := cmd.Start(); err != nil {
 		return err
 	}
@@ -638,7 +713,7 @@ func performTUISelfUpdate(info *ReleaseInfo) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	fmt.Println("[debug] TUI self-update asset selected:", assetName, assetURL)
+	debugln("TUI self-update asset selected:", assetName, assetURL)
 	resp, err := http.Get(assetURL)
 	if err != nil {
 		return "", fmt.Errorf("download failed: %w", err)
@@ -650,7 +725,7 @@ func performTUISelfUpdate(info *ReleaseInfo) (string, error) {
 	currentExe := tuiExePath()
 	tmpNew := currentExe + ".new"
 	tmpBak := currentExe + ".old"
-	fmt.Println("[debug] TUI self-update current/new/bak:", currentExe, tmpNew, tmpBak)
+	debugln("TUI self-update current/new/bak:", currentExe, tmpNew, tmpBak)
 	out, err := os.Create(tmpNew)
 	if err != nil {
 		return "", err
@@ -688,7 +763,7 @@ func performPromptAction(spec *updatePromptSpec) tea.Cmd {
 		if spec == nil {
 			return updatePromptResultMsg{action: "none", err: fmt.Errorf("missing prompt spec")}
 		}
-		fmt.Println("[debug] performing prompt action:", spec.action)
+		debugln("performing prompt action:", spec.action)
 		switch spec.action {
 		case "update-uat":
 			info, _ := fetchReleaseInfo()
@@ -696,7 +771,7 @@ func performPromptAction(spec *updatePromptSpec) tea.Cmd {
 			if err != nil {
 				return updatePromptResultMsg{action: spec.action, err: err}
 			}
-			fmt.Println("[debug] UAT prompt accepted; switching to manual update command flow")
+			debugln("UAT prompt accepted; switching to manual update command flow")
 			_ = assetURL
 			_ = totalSize
 			return updatePromptResultMsg{action: spec.action, text: "run-uat-update"}

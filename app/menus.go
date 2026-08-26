@@ -23,10 +23,13 @@ type menuDef struct {
 
 // ── menu definitions ────────────────────────────────────────────────────────
 
-func mainMenuDef(version string) menuDef {
+func mainMenuDef(version, versionNote string) menuDef {
 	sub := "UAssetTool not found — download it below"
 	if version != "" {
-		sub = "Running UAssetTool " + version
+		sub = "Running UAssetTool " + normalizeVersionDisplay(version)
+		if versionNote != "" {
+			sub += "  " + versionNote
+		}
 	}
 	title := "UAssetTool TUI"
 	tuiVersion := normalizeVersionTag(currentTUIVersion())
@@ -70,6 +73,7 @@ var assetOpsMenu = menuDef{
 		{"Inject Texture", "•", accentCyan, "Inject an image into a Texture2D asset"},
 		{"Batch Inject Textures", "•", accentCyan, "Inject matching replacement images into Texture2D assets in bulk"},
 		{"Extract Texture", "•", accentCyan, "Extract a Texture2D asset to an image file"},
+		{"Batch Extract Textures", "•", accentCyan, "Extract every Texture2D asset in a folder to images"},
 		{"← Back", " ", dimStyle, ""},
 	},
 }
@@ -102,6 +106,7 @@ var pakMenu = menuDef{
 		{"Create PAK", "•", accentYellow, "Package files into a new PAK archive"},
 		{"Create Companion PAK", "•", accentYellow, "Build the companion PAK file used with a mod container"},
 		{"Extract/List PAK", "•", accentYellow, "Extract files from a PAK or list its contents"},
+		{"List PAK Contents", "•", accentYellow, "List a PAK without extracting, optionally paths only"},
 		{"← Back", " ", dimStyle, ""},
 	},
 }
@@ -123,7 +128,7 @@ var niagaraMenu = menuDef{
 		{"Niagara Details", "•", accentMagenta, "Inspect Niagara color curves and asset details"},
 		{"Niagara Edit", "•", accentMagenta, "Apply JSON-based edits to selected Niagara exports"},
 		{"Niagara Audit", "•", accentMagenta, "Deep-scan Niagara exports for color-related data"},
-		{"Scan ChildBP IsEnemy", "•", accentMagenta, "Scan ChildBP assets for IsEnemy parameter redirects"},
+		{"Parse Locres", "•", accentMagenta, "Dump, filter, or search localization .locres entries"},
 		{"← Back", " ", dimStyle, ""},
 	},
 }
@@ -161,4 +166,13 @@ func dimVal(v string) string {
 		return v[:47] + "..."
 	}
 	return v
+}
+
+// normalizeVersionDisplay renders a version with a leading v, like the tags do.
+func normalizeVersionDisplay(v string) string {
+	v = normalizeVersionTag(v)
+	if v == "" {
+		return ""
+	}
+	return "v" + v
 }

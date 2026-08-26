@@ -77,7 +77,7 @@ func keyHint(key, desc string) string {
 func menuKeybar() string {
 	return "  " + strings.Join([]string{
 		keyHint("↑↓", "navigate"),
-		keyHint("⏎", "select"),
+		keyHint("enter", "select"),
 		keyHint("esc", "back"),
 		keyHint("q", "quit"),
 	}, "  ")
@@ -87,7 +87,7 @@ func formKeybar() string {
 	return "  " + strings.Join([]string{
 		keyHint("tab", "next"),
 		keyHint("↑↓", "navigate"),
-		keyHint("⏎", "submit"),
+		keyHint("enter", "submit"),
 		keyHint("esc", "cancel"),
 	}, "  ")
 }
@@ -479,7 +479,7 @@ func (m model) viewPreview() string {
 	b.WriteString(cardStyle.Render(previewLine))
 	b.WriteString("\n\n")
 
-	b.WriteString("  " + keyHint("Y/⏎", "run command") + "    " + keyHint("N/esc", "cancel"))
+	b.WriteString("  " + keyHint("Y/enter", "run command") + "    " + keyHint("N/esc", "cancel"))
 	b.WriteString("\n")
 
 	return b.String()
@@ -527,7 +527,7 @@ func (m model) viewPrompt() string {
 	}
 	b.WriteString("  " + confirm + "    " + cancel)
 	b.WriteString("\n\n")
-	b.WriteString("  " + keyHint("←→/tab", "choose") + "    " + keyHint("Y/⏎", "confirm") + "    " + keyHint("N/esc", "skip"))
+	b.WriteString("  " + keyHint("←→/tab", "choose") + "    " + keyHint("Y/enter", "confirm") + "    " + keyHint("N/esc", "skip"))
 	b.WriteString("\n")
 
 	return b.String()
@@ -707,7 +707,7 @@ func (m model) viewOutput() string {
 	b.WriteString(renderManualBox(lines, boxWidth, borderStyle, maxLines, m.outputScroll))
 	b.WriteString("\n\n")
 
-	b.WriteString("  " + keyHint("↑↓/PgUp/PgDn/Home/End", "scroll") + "    " + keyHint("Ctrl+C", "copy") + "    " + keyHint("⏎/esc", "back to menu"))
+	b.WriteString("  " + keyHint("↑↓/PgUp/PgDn/Home/End", "scroll") + "    " + keyHint("Ctrl+C", "copy") + "    " + keyHint("backspace/esc", "back to menu"))
 	b.WriteString("\n")
 
 	return b.String()
@@ -724,7 +724,7 @@ func (m model) viewSettingInput() string {
 	b.WriteString("\n\n")
 	b.WriteString("  " + m.settingInput.View())
 	b.WriteString("\n\n")
-	b.WriteString("  " + keyHint("⏎", "save") + "    " + keyHint("esc", "cancel"))
+	b.WriteString("  " + keyHint("enter", "save") + "    " + keyHint("esc", "cancel"))
 	b.WriteString("\n")
 
 	return b.String()

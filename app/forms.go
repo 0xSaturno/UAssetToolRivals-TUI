@@ -37,7 +37,7 @@ func assetForm(choice int) *commandForm {
 	switch choice {
 	case 0:
 		return &commandForm{command: "detect", fields: []formField{
-			{label: "Asset Path (.uasset)"},
+			{label: "Asset Path (.uasset) or Directory"},
 			{label: "Mappings Path (.usmap)", configKey: "UsmapPath", optional: true},
 		}}
 	case 1:
@@ -53,7 +53,7 @@ func assetForm(choice int) *commandForm {
 	case 3:
 		return &commandForm{command: "dump", fields: []formField{
 			{label: "Asset Path (.uasset)"},
-			{label: "Mappings Path (.usmap)", configKey: "UsmapPath", optional: true},
+			{label: "Mappings Path (.usmap)", configKey: "UsmapPath"},
 		}}
 	case 4:
 		return &commandForm{command: "skeletal_mesh_info", fields: []formField{
@@ -61,11 +61,11 @@ func assetForm(choice int) *commandForm {
 			{label: "Mappings Path (.usmap)", configKey: "UsmapPath"},
 		}}
 	case 5:
+		// pixel format comes from the base asset; no --format option
 		return &commandForm{command: "inject_texture", fields: []formField{
 			{label: "Base UAsset (.uasset)"},
 			{label: "Image File (png/tga/dds/bmp/jpeg)"},
 			{label: "Output UAsset (.uasset)"},
-			{label: "Compression Format (BC7/BC3/BC1/BC5/BC4/BGRA8)", optional: true},
 			{label: "Disable Mipmaps?", boolToggle: true, optional: true},
 			{label: "Mappings Path (.usmap)", configKey: "UsmapPath", optional: true},
 		}}
@@ -74,7 +74,6 @@ func assetForm(choice int) *commandForm {
 			{label: "UAsset Directory"},
 			{label: "Image Directory"},
 			{label: "Output Directory"},
-			{label: "Compression Format (BC7/BC3/BC1/BC5/BC4/BGRA8)", optional: true},
 			{label: "Disable Mipmaps?", boolToggle: true, optional: true},
 			{label: "Mappings Path (.usmap)", configKey: "UsmapPath", optional: true},
 		}}
@@ -82,6 +81,14 @@ func assetForm(choice int) *commandForm {
 		return &commandForm{command: "extract_texture", fields: []formField{
 			{label: "Texture UAsset (.uasset)"},
 			{label: "Output Image Path"},
+			{label: "Output Format (PNG/TGA/DDS/BMP)", optional: true},
+			{label: "Mip Index", optional: true},
+			{label: "Mappings Path (.usmap)", configKey: "UsmapPath", optional: true},
+		}}
+	case 8:
+		return &commandForm{command: "batch_extract_texture", fields: []formField{
+			{label: "UAsset Directory"},
+			{label: "Output Directory"},
 			{label: "Output Format (PNG/TGA/DDS/BMP)", optional: true},
 			{label: "Mip Index", optional: true},
 			{label: "Mappings Path (.usmap)", configKey: "UsmapPath", optional: true},
@@ -95,7 +102,6 @@ func zenForm(choice int) *commandForm {
 	case 0:
 		return &commandForm{command: "to_zen", fields: []formField{
 			{label: "Asset Path (.uasset)"},
-			{label: "Mappings Path (.usmap)", configKey: "UsmapPath", optional: true},
 			{label: "Disable Material Tags?", boolToggle: true, optional: true},
 		}}
 	case 1:
@@ -112,11 +118,12 @@ func zenForm(choice int) *commandForm {
 			{label: "Output Base Name"},
 			{label: "Mount Point (default ../../../)", optional: true},
 			{label: "Game Path (default Marvel/Content/)", optional: true},
-			{label: "UAsset Files (space sep or directory)"},
+			{label: "Input Files/Dirs/.pak (space sep)"},
 			{label: "Compress?", boolToggle: true, optional: true},
 			{label: "Enable Obfuscation?", boolToggle: true, optional: true},
 			{label: "PAK AES Key", configKey: "AesKey", optional: true},
 			{label: "Disable Material Tags?", boolToggle: true, optional: true},
+			{label: "Hybrid (embed non-Unreal files)?", boolToggle: true, optional: true},
 		}}
 	case 3:
 		return &commandForm{command: "extract_iostore", fields: []formField{
@@ -133,6 +140,7 @@ func zenForm(choice int) *commandForm {
 			{label: "Mod Container Path(s)", optional: true},
 			{label: "Filter Patterns (space sep or .txt file)", optional: true},
 			{label: "AES Key", configKey: "AesKey", optional: true},
+			{label: "Extra Container Path(s)", optional: true},
 			{label: "Extract dependencies?", boolToggle: true, optional: true, defaultVal: "N"},
 		}}
 	case 5:
@@ -144,6 +152,10 @@ func zenForm(choice int) *commandForm {
 			{label: "UTOC Path or Directory"},
 			{label: "AES Key", configKey: "AesKey", optional: true},
 			{label: "Filter Pattern (single)", optional: true},
+			{label: "Asset Type Filter (comma sep)", optional: true},
+			{label: "Report Asset Types?", boolToggle: true, optional: true},
+			{label: "ScriptObjects.bin Path", optional: true},
+			{label: "Game Paks Dir (for script objects)", optional: true},
 		}}
 	case 7:
 		return &commandForm{command: "dump_zen_from_game", fields: []formField{
@@ -179,11 +191,13 @@ func zenForm(choice int) *commandForm {
 func pakForm(choice int) *commandForm {
 	switch choice {
 	case 0:
+		// --root only scopes the inputs after it, so it is asked first
 		return &commandForm{command: "create_pak", fields: []formField{
 			{label: "Output PAK Path"},
-			{label: "Files (space sep)"},
+			{label: "Root Directory (base for in-PAK paths)", optional: true},
+			{label: "Files or Directories (space sep)"},
 			{label: "Mount Point (default ../../../)", optional: true},
-			{label: "Enable compression?", boolToggle: true, optional: true},
+			{label: "AES Key", configKey: "AesKey", optional: true},
 		}}
 	case 1:
 		return &commandForm{command: "create_companion_pak", fields: []formField{
@@ -201,6 +215,14 @@ func pakForm(choice int) *commandForm {
 			{label: "List only?", boolToggle: true, optional: true},
 			{label: "Filter Patterns (space sep)", optional: true},
 		}}
+	case 3:
+		// --filter is greedy, so it stays last
+		return &commandForm{command: "list_pak", fields: []formField{
+			{label: "PAK File"},
+			{label: "AES Key", configKey: "AesKey", optional: true},
+			{label: "Paths only?", boolToggle: true, optional: true},
+			{label: "Filter Patterns (space sep)", optional: true},
+		}}
 	}
 	return nil
 }
@@ -212,6 +234,7 @@ func jsonForm(choice int) *commandForm {
 			{label: "Asset Path or Directory"},
 			{label: "Mappings Path (.usmap)", configKey: "UsmapPath", optional: true},
 			{label: "Output Directory", optional: true},
+			{label: "Compact (read-only) JSON?", boolToggle: true, optional: true},
 		}}
 	case 1:
 		return &commandForm{command: "from_json", fields: []formField{
@@ -244,10 +267,13 @@ func niagaraForm(choice int) *commandForm {
 			{label: "Mappings Path (.usmap)", configKey: "UsmapPath", optional: true},
 		}}
 	case 3:
-		return &commandForm{command: "scan_childbp_isenemy", fields: []formField{
-			{label: "Paks Directory or Extracted Folder", configKey: "GamePaksDir"},
-			{label: "AES Key", configKey: "AesKey", optional: true},
-			{label: "Is Extracted?", boolToggle: true, optional: true},
+		return &commandForm{command: "parse_locres", fields: []formField{
+			{label: "Locres File or Directory"},
+			{label: "Output JSON Path (recommended for full dumps)", optional: true},
+			{label: "Namespace Filter", optional: true},
+			{label: "Key Lookup (needs namespace)", optional: true},
+			{label: "Search Term", optional: true},
+			{label: "Stats only?", boolToggle: true, optional: true},
 		}}
 	}
 	return nil
