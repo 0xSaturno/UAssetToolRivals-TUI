@@ -1,9 +1,9 @@
 package app
 
 import (
-	"time"
-
+	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textinput"
+	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 )
 
@@ -46,11 +46,14 @@ type model struct {
 	formMenuPath string
 
 	// output
-	output         string
-	outputErr      bool
-	runningOutput  string
-	runningScroll  int
-	outputScroll   int
+	output        string
+	outputErr     bool
+	runningOutput string
+
+	// scrollable panes
+	outVP          viewport.Model
+	logVP          viewport.Model
+	logFollow      bool
 	draggingScroll string
 	dragOffsetY    int
 
@@ -69,9 +72,10 @@ type model struct {
 	// preview
 	previewArgs    []string
 	previewCommand string
+	previewCursor  int
 
 	// animation
-	spinFrame int
+	spin spinner.Model
 
 	updateQueue   []updatePromptSpec
 	prompt        *updatePromptSpec
@@ -98,8 +102,6 @@ type toolOutputMsg struct {
 type toolStopMsg struct {
 	err error
 }
-
-type spinTickMsg struct{}
 
 type updateCheckMsg struct {
 	state updateCheckState
@@ -138,21 +140,25 @@ type updateCheckState struct {
 	TUINeedsUpdate     bool
 }
 
-func spinTick() tea.Cmd {
-	return tea.Tick(100*time.Millisecond, func(time.Time) tea.Msg {
-		return spinTickMsg{}
-	})
-}
-
 // ── init ────────────────────────────────────────────────────────────────────
 
 func initialModel() model {
-	return model{
-		state:  viewMain,
-		config: loadConfig(),
-		width:  80,
-		height: 30,
+	sp := spinner.New()
+	sp.Spinner = spinner.Pulse
+	sp.Style = accentCyan
+
+	m := model{
+		state:     viewMain,
+		config:    loadConfig(),
+		width:     80,
+		height:    30,
+		spin:      sp,
+		logFollow: true,
 	}
+	m.outVP = viewport.New(10, 10)
+	m.logVP = viewport.New(10, 10)
+	m.resizePanes()
+	return m
 }
 
 func (m model) Init() tea.Cmd {

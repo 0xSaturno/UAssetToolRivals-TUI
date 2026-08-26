@@ -7,153 +7,10 @@ import (
 	"strings"
 
 	"github.com/atotto/clipboard"
+	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 )
-
-func scrollBy(scroll *int, delta int) {
-	if *scroll < 0 {
-		*scroll = 0
-	}
-	*scroll += delta
-	if *scroll < 0 {
-		*scroll = 0
-	}
-}
-
-func (m model) runningBoxRect() (left, top, width, visibleLines int) {
-	left = 0
-	top = 5
-	width = m.width - 8
-	if width < 30 {
-		width = 30
-	}
-	if width > 120 {
-		width = 120
-	}
-	visibleLines = m.height - 12
-	if visibleLines < 6 {
-		visibleLines = 6
-	}
-	return
-}
-
-func (m model) outputBoxRect() (left, top, width, visibleLines int) {
-	left = 0
-	top = 3
-	if m.dlInfo != nil && !m.outputErr {
-		top += 1
-		bodyLines := 0
-		if m.dlInfo.Body != "" {
-			bodyLines = len(strings.Split(m.dlInfo.Body, "\n"))
-			if bodyLines > 12 {
-				bodyLines = 13
-			}
-			bodyLines += 2
-		}
-		top += 3 + bodyLines
-	}
-	width = m.width - 6
-	if width < 30 {
-		width = 30
-	}
-	if width > 140 {
-		width = 140
-	}
-	visibleLines = m.height - 14
-	if visibleLines < 8 {
-		visibleLines = 8
-	}
-	return
-}
-
-func mouseScrollTarget(totalLines, visibleLines, row int) int {
-	if totalLines <= visibleLines {
-		return 0
-	}
-	if row < 0 {
-		row = 0
-	}
-	if row >= visibleLines {
-		row = visibleLines - 1
-	}
-	maxScroll := totalLines - visibleLines
-	if visibleLines <= 1 {
-		return maxScroll
-	}
-	return (row * maxScroll) / (visibleLines - 1)
-}
-
-func scrollbarThumbMetrics(totalLines, visibleLines, scroll int) (thumbStart, thumbSize int) {
-	if visibleLines <= 0 {
-		return 0, 0
-	}
-	if totalLines <= visibleLines {
-		return 0, 0
-	}
-	thumbSize = (visibleLines * visibleLines) / totalLines
-	if thumbSize < 1 {
-		thumbSize = 1
-	}
-	if thumbSize > visibleLines {
-		thumbSize = visibleLines
-	}
-	trackRange := visibleLines - thumbSize
-	maxScroll := totalLines - visibleLines
-	if trackRange <= 0 || maxScroll <= 0 {
-		return 0, thumbSize
-	}
-	scroll = clampScroll(totalLines, visibleLines, scroll)
-	thumbStart = (scroll * trackRange) / maxScroll
-	return thumbStart, thumbSize
-}
-
-func mouseDragScrollTarget(totalLines, visibleLines, thumbSize, thumbRow int) int {
-	if totalLines <= visibleLines {
-		return 0
-	}
-	trackRange := visibleLines - thumbSize
-	maxScroll := totalLines - visibleLines
-	if trackRange <= 0 || maxScroll <= 0 {
-		return 0
-	}
-	if thumbRow < 0 {
-		thumbRow = 0
-	}
-	if thumbRow > trackRange {
-		thumbRow = trackRange
-	}
-	return (thumbRow * maxScroll) / trackRange
-}
-
-func (m model) normalizedRunningLines() []string {
-	logText := normalizeBoxText(strings.TrimRight(m.runningOutput, "\n"))
-	logLines := strings.Split(logText, "\n")
-	if strings.TrimSpace(m.runningOutput) == "" {
-		return []string{dimStyle.Render("Waiting for UAssetTool output...")}
-	}
-	_, _, width, _ := m.runningBoxRect()
-	contentWidth := width - cardBox.GetHorizontalFrameSize()
-	if contentWidth < 10 {
-		contentWidth = 10
-	}
-	for i, line := range logLines {
-		logLines[i] = smartTruncateMiddle(line, contentWidth)
-	}
-	return hardWrapLines(logLines, contentWidth)
-}
-
-func (m model) normalizedOutputLines() []string {
-	out := normalizeBoxText(m.output)
-	lines := strings.Split(out, "\n")
-	_, _, width, _ := m.outputBoxRect()
-	contentWidth := width - successBox.GetHorizontalFrameSize()
-	if contentWidth < 10 {
-		contentWidth = 10
-	}
-	return hardWrapLines(lines, contentWidth)
-}
 
 func copyTextToClipboard(text string) string {
 	text = normalizeBoxText(text)
@@ -271,6 +128,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
+		m.resizePanes()
+		m.resizeForm()
 		return m, nil
 
 	case updateCheckMsg:
@@ -294,14 +153,15 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.state = viewDownloading
 			m.status = "Fetching release info..."
 			m.dlProgress = downloadProgressMsg{}
-			return m, tea.Batch(spinTick(), downloadToolCmd())
+			return m, tea.Batch(m.spin.Tick, downloadToolCmd())
 		}
 		if msg.err != nil {
 			m.state = viewOutput
 			m.status = ""
 			m.output = "Update failed: " + msg.err.Error()
 			m.outputErr = true
-			m.outputScroll = -1
+			m.setOutputContent()
+			m.outVP.GotoTop()
 			m.prompt = nil
 			m.promptCursor = 0
 			return m, nil
@@ -313,7 +173,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.status = ""
 			m.output = msg.text
 			m.outputErr = false
-			m.outputScroll = -1
+			m.setOutputContent()
+			m.outVP.GotoTop()
 			return m, tea.Quit
 		}
 		m.prompt = nil
@@ -321,16 +182,17 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.status = msg.text
 		return m.showNextPrompt()
 
-	case spinTickMsg:
-		if m.state == viewRunning || m.state == viewDownloading {
-			m.spinFrame++
-			return m, spinTick()
+	case spinner.TickMsg:
+		if m.state != viewRunning && m.state != viewDownloading {
+			return m, nil
 		}
-		return m, nil
+		var cmd tea.Cmd
+		m.spin, cmd = m.spin.Update(msg)
+		return m, cmd
 
 	case toolOutputMsg:
 		m.runningOutput += msg.chunk
-		m.runningScroll = -1
+		m.setLogContent()
 		return m, nil
 
 	case toolStopMsg:
@@ -351,9 +213,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil && m.output == "" {
 			m.output = msg.err.Error()
 		}
-		m.outputScroll = -1
 		m.runningOutput = ""
-		m.runningScroll = 0
+		m.logFollow = true
+		m.setOutputContent()
+		m.outVP.GotoBottom()
 		return m, nil
 
 	case downloadProgressMsg:
@@ -393,7 +256,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.uatVersion = m.config.ToolVersion
 			}
 		}
-		m.outputScroll = -1
+		m.setOutputContent()
+		if m.dlInfo != nil && !m.outputErr {
+			m.outVP.GotoTop()
+		} else {
+			m.outVP.GotoBottom()
+		}
 		return m, nil
 
 	case tea.MouseMsg:
@@ -536,111 +404,41 @@ func (m model) dismissPrompt() (tea.Model, tea.Cmd) {
 // ── mouse ───────────────────────────────────────────────────────────────────
 
 func (m model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
+	if msg.Action == tea.MouseActionRelease {
+		m.draggingScroll = ""
+		m.dragOffsetY = 0
+	}
+
 	switch m.state {
-	case viewForm, viewSettingInput, viewDownloading:
-		if msg.Action == tea.MouseActionRelease {
-			m.draggingScroll = ""
-			m.dragOffsetY = 0
-		}
+	case viewForm, viewSettingInput, viewDownloading, viewPrompt:
 		return m, nil
+
 	case viewOutput:
-		left, top, width, visibleLines := m.outputBoxRect()
-		lines := m.normalizedOutputLines()
-		right := left + width - 1
-		contentTop := top + 2
-		contentBottom := contentTop + visibleLines - 1
-		scrollbarX := right - 2
-		thumbStart, thumbSize := scrollbarThumbMetrics(len(lines), visibleLines, m.outputScroll)
-		switch msg.Button {
-		case tea.MouseButtonWheelUp:
-			scrollBy(&m.outputScroll, -3)
-			return m, nil
-		case tea.MouseButtonWheelDown:
-			scrollBy(&m.outputScroll, 3)
-			return m, nil
-		}
-		if msg.Action == tea.MouseActionMotion && m.draggingScroll == "output" {
-			thumbRow := msg.Y - contentTop - m.dragOffsetY
-			m.outputScroll = mouseDragScrollTarget(len(lines), visibleLines, thumbSize, thumbRow)
-			return m, nil
-		}
-		if msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonLeft {
-			if msg.X == scrollbarX && msg.Y >= contentTop && msg.Y <= contentBottom {
-				row := msg.Y - contentTop
-				if row >= thumbStart && row < thumbStart+thumbSize {
-					m.draggingScroll = "output"
-					m.dragOffsetY = row - thumbStart
-				} else {
-					m.outputScroll = mouseScrollTarget(len(lines), visibleLines, row)
-				}
-			}
-			return m, nil
-		}
-		if msg.Action == tea.MouseActionRelease {
-			m.draggingScroll = ""
-			m.dragOffsetY = 0
-		}
-		return m, nil
+		return m.paneMouse(msg, "output")
+
 	case viewRunning:
-		left, top, width, visibleLines := m.runningBoxRect()
-		lines := m.normalizedRunningLines()
-		right := left + width - 1
-		contentTop := top + 2
-		contentBottom := contentTop + visibleLines - 1
-		scrollbarX := right - 2
-		thumbStart, thumbSize := scrollbarThumbMetrics(len(lines), visibleLines, m.runningScroll)
-		switch msg.Button {
-		case tea.MouseButtonWheelUp:
-			scrollBy(&m.runningScroll, -3)
-			return m, nil
-		case tea.MouseButtonWheelDown:
-			scrollBy(&m.runningScroll, 3)
-			return m, nil
-		}
-		if msg.Action == tea.MouseActionMotion && m.draggingScroll == "running" {
-			thumbRow := msg.Y - contentTop - m.dragOffsetY
-			m.runningScroll = mouseDragScrollTarget(len(lines), visibleLines, thumbSize, thumbRow)
-			return m, nil
-		}
-		if msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonLeft {
-			if msg.X == scrollbarX && msg.Y >= contentTop && msg.Y <= contentBottom {
-				row := msg.Y - contentTop
-				if row >= thumbStart && row < thumbStart+thumbSize {
-					m.draggingScroll = "running"
-					m.dragOffsetY = row - thumbStart
-				} else {
-					m.runningScroll = mouseScrollTarget(len(lines), visibleLines, row)
-				}
-			}
-			return m, nil
-		}
-		if msg.Action == tea.MouseActionRelease {
-			m.draggingScroll = ""
-			m.dragOffsetY = 0
-		}
-		return m, nil
+		return m.paneMouse(msg, "running")
+
 	case viewPreview:
-		if msg.Action == tea.MouseActionRelease {
-			m.draggingScroll = ""
-			m.dragOffsetY = 0
-		}
 		if msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonLeft {
-			if msg.Y >= 8 && msg.Y <= 9 {
+			switch m.previewButtonHit(msg.X, msg.Y) {
+			case 0:
 				return m.runPreviewedCommand()
-			}
-			if msg.Y >= 10 {
+			case 1:
 				m.state = viewCategory
 				m.cursor = 0
-				return m, nil
 			}
 		}
 		return m, nil
 	}
 
+	// menus: rows run down the body, one per item
 	menu := m.currentMenu()
-	headerLines := m.menuHeaderLines()
-	idx := msg.Y - headerLines + 1
-	if idx < 0 || idx >= len(menu.items) {
+	listW, _ := m.menuPaneWidths(menu)
+	start, _ := m.menuWindow(len(menu.items))
+	idx := msg.Y - m.menuListTop() + start
+	left := m.contentLeft()
+	if idx < 0 || idx >= len(menu.items) || msg.X < left || msg.X >= left+listW {
 		return m, nil
 	}
 
@@ -655,6 +453,57 @@ func (m model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	}
 
 	return m, nil
+}
+
+// paneMouse drives one of the scrollable viewports: the wheel scrolls it, and
+// the scrollbar gutter can be clicked or dragged.
+func (m model) paneMouse(msg tea.MouseMsg, which string) (tea.Model, tea.Cmd) {
+	vp := &m.outVP
+	if which == "running" {
+		vp = &m.logVP
+	}
+	contentTop, scrollbarX, height := m.paneRect(m.state)
+	total := vp.TotalLineCount()
+
+	switch msg.Button {
+	case tea.MouseButtonWheelUp:
+		vp.ScrollUp(3)
+		m.syncFollow(which)
+		return m, nil
+	case tea.MouseButtonWheelDown:
+		vp.ScrollDown(3)
+		m.syncFollow(which)
+		return m, nil
+	}
+
+	thumbStart, thumbSize := thumbMetrics(total, height, vp.YOffset)
+
+	if msg.Action == tea.MouseActionMotion && m.draggingScroll == which {
+		vp.SetYOffset(offsetForThumbRow(total, height, thumbSize, msg.Y-contentTop-m.dragOffsetY))
+		m.syncFollow(which)
+		return m, nil
+	}
+
+	if msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonLeft &&
+		msg.X == scrollbarX && msg.Y >= contentTop && msg.Y < contentTop+height {
+		row := msg.Y - contentTop
+		if row >= thumbStart && row < thumbStart+thumbSize {
+			m.draggingScroll = which
+			m.dragOffsetY = row - thumbStart
+		} else {
+			vp.SetYOffset(offsetForTrackRow(total, height, row))
+			m.syncFollow(which)
+		}
+	}
+	return m, nil
+}
+
+// syncFollow keeps the log pane pinned to the tail only while the user is
+// actually looking at the tail.
+func (m *model) syncFollow(which string) {
+	if which == "running" {
+		m.logFollow = m.logVP.AtBottom()
+	}
 }
 
 // ── keyboard ────────────────────────────────────────────────────────────────
@@ -686,64 +535,49 @@ func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch m.state {
 	case viewOutput:
 		switch key {
-		case "up", "k":
-			if m.outputScroll > 0 {
-				m.outputScroll--
-			}
-		case "down", "j":
-			m.outputScroll++
-		case "pgup", "b":
-			m.outputScroll -= 8
-			if m.outputScroll < 0 {
-				m.outputScroll = 0
-			}
-		case "pgdown", "f":
-			m.outputScroll += 8
-		case "home":
-			m.outputScroll = 0
-		case "end":
-			m.outputScroll = -1
 		case "esc", "backspace", "q":
 			if m.form != nil {
 				m.state = viewForm
 				m.status = ""
-				m.outputScroll = 0
 				m.output = ""
 				m.outputErr = false
+				m.setOutputContent()
 				return m, nil
 			}
 			m.output = ""
 			m.outputErr = false
-			m.outputScroll = 0
 			m.dlInfo = nil
+			m.setOutputContent()
 			return m.goBack()
+		case "home", "g":
+			m.outVP.GotoTop()
+			return m, nil
+		case "end", "G":
+			m.outVP.GotoBottom()
+			return m, nil
 		}
-		return m, nil
+		var cmd tea.Cmd
+		m.outVP, cmd = m.outVP.Update(msg)
+		return m, cmd
 
 	case viewRunning:
 		switch key {
 		case "ctrl+x", "ctrl+z":
 			m.status = "Stopping UAssetTool..."
 			return m, stopToolCmd()
-		case "up", "k":
-			if m.runningScroll > 0 {
-				m.runningScroll--
-			}
-		case "down", "j":
-			m.runningScroll++
-		case "pgup", "b":
-			m.runningScroll -= 8
-			if m.runningScroll < 0 {
-				m.runningScroll = 0
-			}
-		case "pgdown", "f":
-			m.runningScroll += 8
-		case "home":
-			m.runningScroll = 0
-		case "end":
-			m.runningScroll = -1
+		case "home", "g":
+			m.logVP.GotoTop()
+			m.logFollow = false
+			return m, nil
+		case "end", "G":
+			m.logVP.GotoBottom()
+			m.logFollow = true
+			return m, nil
 		}
-		return m, nil
+		var cmd tea.Cmd
+		m.logVP, cmd = m.logVP.Update(msg)
+		m.logFollow = m.logVP.AtBottom()
+		return m, cmd
 
 	case viewDownloading:
 		return m, nil
@@ -796,14 +630,24 @@ func (m model) handleMenuKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m model) handlePreviewKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	key := msg.String()
-	switch key {
-	case "y", "Y", "enter":
-		return m.runPreviewedCommand()
-	case "n", "N", "esc":
+	cancel := func() (tea.Model, tea.Cmd) {
 		m.state = viewCategory
 		m.cursor = 0
 		return m, nil
+	}
+	switch msg.String() {
+	case "left", "h", "right", "l", "tab":
+		m.previewCursor = 1 - m.previewCursor
+		return m, nil
+	case "y", "Y":
+		return m.runPreviewedCommand()
+	case "enter":
+		if m.previewCursor == 0 {
+			return m.runPreviewedCommand()
+		}
+		return cancel()
+	case "n", "N", "esc":
+		return cancel()
 	}
 	return m, nil
 }
@@ -849,8 +693,10 @@ func (m model) runPreviewedCommand() (tea.Model, tea.Cmd) {
 	m.state = viewRunning
 	m.status = "Running..."
 	m.runningOutput = ""
-	m.runningScroll = -1
-	return m, tea.Batch(spinTick(), func() tea.Msg {
+	m.logFollow = true
+	m.logVP.GotoTop()
+	m.setLogContent()
+	return m, tea.Batch(m.spin.Tick, func() tea.Msg {
 		out, err := runTool(args)
 		return toolDoneMsg{out, err}
 	})
@@ -891,7 +737,7 @@ func (m model) selectCurrentItem() (tea.Model, tea.Cmd) {
 			m.state = viewDownloading
 			m.status = "Fetching release info..."
 			m.dlProgress = downloadProgressMsg{}
-			return m, tea.Batch(spinTick(), downloadToolCmd())
+			return m, tea.Batch(m.spin.Tick, downloadToolCmd())
 		case 2:
 			m.state = viewSettings
 			m.cursor = 0
@@ -972,12 +818,8 @@ func (m model) openForm(menuPath string, choice int) (tea.Model, tea.Cmd) {
 	m.formInputs = make([]textinput.Model, len(form.fields))
 	for i, f := range form.fields {
 		ti := textinput.New()
-		ti.Placeholder = f.label
-		if f.optional {
-			ti.Placeholder += " (optional)"
-		}
+		ti.Placeholder = fieldPlaceholder(f)
 		if f.boolToggle {
-			ti.Placeholder = f.label + " [Y/N]"
 			ti.CharLimit = 1
 		}
 		if f.defaultVal != "" {
@@ -989,9 +831,12 @@ func (m model) openForm(menuPath string, choice int) (tea.Model, tea.Cmd) {
 		if i == 0 {
 			ti.Focus()
 		}
-		ti.Width = 60
+		ti.Width = fieldInputWidth(m.contentWidth())
 		ti.PromptStyle = accentCyan
-		ti.TextStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(colorText))
+		ti.TextStyle = textStyle
+		ti.PlaceholderStyle = dimStyle
+		ti.Cursor.Style = accentCyan
+		ti.KeyMap = inputKeyMap()
 		m.formInputs[i] = ti
 	}
 	return m, m.formInputs[0].Focus()
@@ -999,6 +844,13 @@ func (m model) openForm(menuPath string, choice int) (tea.Model, tea.Cmd) {
 
 func (m model) handleFormKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	key := msg.String()
+	if k := ctrlWordKey(msg); k != "" {
+		key = k
+	}
+	if m.formCursor >= 0 && m.formCursor < len(m.formInputs) &&
+		handleWordKey(&m.formInputs[m.formCursor], key) {
+		return m, nil
+	}
 
 	switch key {
 	case "esc":
@@ -1051,6 +903,7 @@ func (m model) submitForm() (tea.Model, tea.Cmd) {
 
 	if m.config.PreviewCommand {
 		m.state = viewPreview
+		m.previewCursor = 0
 		m.previewArgs = args
 		m.previewCommand = preview
 		return m, nil
@@ -1059,8 +912,10 @@ func (m model) submitForm() (tea.Model, tea.Cmd) {
 	m.state = viewRunning
 	m.status = "Running..."
 	m.runningOutput = ""
-	m.runningScroll = -1
-	return m, tea.Batch(spinTick(), func() tea.Msg {
+	m.logFollow = true
+	m.logVP.GotoTop()
+	m.setLogContent()
+	return m, tea.Batch(m.spin.Tick, func() tea.Msg {
 		out, err := runTool(args)
 		return toolDoneMsg{out, err}
 	})
@@ -1477,11 +1332,14 @@ func (m model) openSettingInput(key, label string) (tea.Model, tea.Cmd) {
 	m.settingKey = key
 	m.settingLabel = label
 	ti := textinput.New()
-	ti.Placeholder = label
+	ti.Placeholder = settingPlaceholder(key)
 	ti.SetValue(m.getConfigVal(key))
-	ti.Width = 60
+	ti.Width = fieldInputWidth(m.contentWidth())
 	ti.PromptStyle = accentYellow
-	ti.TextStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(colorText))
+	ti.TextStyle = textStyle
+	ti.PlaceholderStyle = dimStyle
+	ti.Cursor.Style = accentYellow
+	ti.KeyMap = inputKeyMap()
 	ti.Focus()
 	m.settingInput = ti
 	return m, ti.Focus()
@@ -1489,6 +1347,12 @@ func (m model) openSettingInput(key, label string) (tea.Model, tea.Cmd) {
 
 func (m model) handleSettingInputKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	key := msg.String()
+	if k := ctrlWordKey(msg); k != "" {
+		key = k
+	}
+	if handleWordKey(&m.settingInput, key) {
+		return m, nil
+	}
 	switch key {
 	case "enter":
 		val := strings.Trim(m.settingInput.Value(), `"`)
@@ -1515,4 +1379,30 @@ func (m model) handleSettingInputKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	m.settingInput, cmd = m.settingInput.Update(msg)
 	return m, cmd
+}
+
+// ── input hints ─────────────────────────────────────────────────────────────
+//
+// The field label is drawn into the box border, so the placeholder is free to
+// hint at the expected shape of the value instead of repeating it.
+
+func fieldPlaceholder(f formField) string {
+	switch {
+	case f.boolToggle:
+		return "Y / N"
+	case isPathLikeField(f.label), strings.Contains(f.label, "(."):
+		// labels like "Base UAsset (.uasset)" name an extension, not a path
+		return "type or drag a path here"
+	}
+	return ""
+}
+
+func settingPlaceholder(key string) string {
+	switch key {
+	case "AesKey":
+		return "64 hex characters"
+	case "GamePaksDir", "UsmapPath", "OutputExtractionDir":
+		return "type or drag a path here"
+	}
+	return ""
 }

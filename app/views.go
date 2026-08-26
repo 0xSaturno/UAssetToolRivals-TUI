@@ -6,66 +6,101 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/bubbles/viewport"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/lucasb-eyer/go-colorful"
 )
 
-var ansiEscapePattern = regexp.MustCompile(`\x1b\[[0-9;?]*[ -/]*[@-~]`)
+var ansiEscapePattern = regexp.MustCompile("\x1b\\[[0-9;?]*[ -/]*[@-~]")
 
 // ── view router ─────────────────────────────────────────────────────────────
 
 func (m model) View() string {
+	w := m.contentWidth()
 	switch m.state {
 	case viewForm:
-		return m.viewForm()
+		return m.frame(m.formSubhead(), m.viewForm(), formKeybar(w))
 	case viewOutput:
-		return m.viewOutput()
+		return m.frame(m.outputSubhead(), m.viewOutput(), outputKeybar(w))
 	case viewRunning:
-		return m.viewRunning()
+		return m.frame(m.runningSubhead(), m.viewRunning(), runningKeybar(w))
 	case viewDownloading:
-		return m.viewDownload()
+		return m.frame(crumbLine("Download"), m.viewDownload(), "")
 	case viewSettingInput:
-		return m.viewSettingInput()
+		return m.frame(crumbLine("Settings", m.settingLabel), m.viewSettingInput(), settingKeybar(w))
 	case viewPreview:
-		return m.viewPreview()
+		return m.frame(crumbLine("Commands", "Preview"), m.viewPreview(), previewKeybar(w))
 	case viewPrompt:
-		return m.viewPrompt()
+		return m.frame("", m.viewPrompt(), promptKeybar(w))
 	default:
-		return m.viewMenu()
+		menu := m.currentMenu()
+		return m.frame(m.menuSubhead(menu), m.viewMenu(), menuKeybar(w))
 	}
 }
 
 // ── breadcrumbs ─────────────────────────────────────────────────────────────
 
-func (m model) breadcrumb() string {
-	crumbs := []string{"Home"}
-	switch m.state {
-	case viewCategory:
-		crumbs = append(crumbs, "Commands")
-	case viewAssetOps:
-		crumbs = append(crumbs, "Commands", "Asset Ops")
-	case viewZen:
-		crumbs = append(crumbs, "Commands", "Zen/IoStore")
-	case viewPak:
-		crumbs = append(crumbs, "Commands", "PAK Ops")
-	case viewJson:
-		crumbs = append(crumbs, "Commands", "JSON")
-	case viewNiagara:
-		crumbs = append(crumbs, "Commands", "Niagara")
-	case viewSettings:
-		crumbs = append(crumbs, "Settings")
-	}
-	if len(crumbs) <= 1 {
-		return ""
-	}
-	var parts []string
+// crumbLine renders "Home › a › b" with the last crumb highlighted.
+func crumbLine(tail ...string) string {
+	crumbs := append([]string{"Home"}, tail...)
+	parts := make([]string, len(crumbs))
 	for i, c := range crumbs {
 		if i == len(crumbs)-1 {
-			parts = append(parts, breadcrumbActive.Render(c))
+			parts[i] = breadcrumbActive.Render(c)
 		} else {
-			parts = append(parts, breadcrumbStyle.Render(c))
+			parts[i] = breadcrumbStyle.Render(c)
 		}
 	}
-	return "  " + strings.Join(parts, dimStyle.Render(" › ")) + "\n"
+	return strings.Join(parts, dimStyle.Render(" › "))
+}
+
+func (m model) breadcrumb() string {
+	switch m.state {
+	case viewCategory:
+		return crumbLine("Commands")
+	case viewAssetOps:
+		return crumbLine("Commands", "Asset Ops")
+	case viewZen:
+		return crumbLine("Commands", "Zen/IoStore")
+	case viewPak:
+		return crumbLine("Commands", "PAK Ops")
+	case viewJson:
+		return crumbLine("Commands", "JSON")
+	case viewNiagara:
+		return crumbLine("Commands", "Niagara")
+	case viewSettings:
+		return crumbLine("Settings")
+	}
+	return ""
+}
+
+// menuSubhead is the breadcrumb on sub-menus and the status subtitle at home.
+func (m model) menuSubhead(menu menuDef) string {
+	if bc := m.breadcrumb(); bc != "" {
+		return bc
+	}
+	if menu.subtitle != "" {
+		return subtitleStyle.Render(menu.subtitle)
+	}
+	return ""
+}
+
+func (m model) formSubhead() string {
+	if m.form == nil {
+		return ""
+	}
+	return crumbLine("Commands", m.form.command)
+}
+
+func (m model) runningSubhead() string {
+	return crumbLine("Commands", "Running")
+}
+
+func (m model) outputSubhead() string {
+	if m.outputErr {
+		return crumbLine("Commands", accentRed.Render("Failed"))
+	}
+	return crumbLine("Commands", accentGreen.Render("Result"))
 }
 
 // ── key hints ───────────────────────────────────────────────────────────────
@@ -74,47 +109,153 @@ func keyHint(key, desc string) string {
 	return keyHintStyle.Render(key) + " " + keyDescStyle.Render(desc)
 }
 
-func menuKeybar() string {
-	return "  " + strings.Join([]string{
+// keybar joins hints with a separator, dropping trailing ones that do not fit
+// the width. Pass them in descending order of importance: on a narrow terminal
+// the tail is what disappears.
+func keybar(width int, hints ...string) string {
+	sep := keyDescStyle.Render("  ·  ")
+	sepW := lipgloss.Width(sep)
+
+	var b strings.Builder
+	used := 0
+	for i, h := range hints {
+		w := lipgloss.Width(h)
+		if i > 0 {
+			w += sepW
+		}
+		if used+w > width {
+			break
+		}
+		if i > 0 {
+			b.WriteString(sep)
+		}
+		b.WriteString(h)
+		used += w
+	}
+	return b.String()
+}
+
+func menuKeybar(w int) string {
+	return keybar(w,
 		keyHint("↑↓", "navigate"),
 		keyHint("enter", "select"),
 		keyHint("esc", "back"),
 		keyHint("q", "quit"),
-	}, "  ")
+	)
 }
 
-func formKeybar() string {
-	return "  " + strings.Join([]string{
+func formKeybar(w int) string {
+	return keybar(w,
 		keyHint("tab", "next"),
-		keyHint("↑↓", "navigate"),
+		keyHint("↑↓", "field"),
 		keyHint("enter", "submit"),
 		keyHint("esc", "cancel"),
-	}, "  ")
+		keyHint("ctrl+←→", "word"),
+		keyHint("ctrl+⌫/del", "delete word"),
+		keyHint("ctrl+c", "copy"),
+	)
 }
 
-// ── spinner ─────────────────────────────────────────────────────────────────
+func outputKeybar(w int) string {
+	return keybar(w,
+		keyHint("↑↓/pgup/pgdn", "scroll"),
+		keyHint("home/end", "jump"),
+		keyHint("ctrl+c", "copy"),
+		keyHint("esc", "back"),
+	)
+}
 
-func (m model) spinner() string {
-	frames := []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
-	return accentCyan.Render(frames[m.spinFrame%len(frames)])
+func runningKeybar(w int) string {
+	return keybar(w,
+		keyHint("↑↓/pgup/pgdn", "scroll"),
+		keyHint("end", "follow"),
+		keyHint("ctrl+c", "copy"),
+		keyHint("ctrl+x", "stop"),
+	)
+}
+
+func previewKeybar(w int) string {
+	return keybar(w,
+		keyHint("←→/tab", "choose"),
+		keyHint("Y/enter", "run"),
+		keyHint("N/esc", "cancel"),
+	)
+}
+
+func promptKeybar(w int) string {
+	return keybar(w,
+		keyHint("←→/tab", "choose"),
+		keyHint("Y/enter", "confirm"),
+		keyHint("N/esc", "skip"),
+	)
+}
+
+func settingKeybar(w int) string {
+	return keybar(w,
+		keyHint("enter", "save"),
+		keyHint("esc", "cancel"),
+		keyHint("ctrl+←→", "word"),
+		keyHint("ctrl+⌫/del", "delete word"),
+		keyHint("ctrl+c", "copy"),
+	)
 }
 
 // ── progress bar ────────────────────────────────────────────────────────────
 
+// eighths are the horizontal partial-block glyphs, so the bar advances a
+// fraction of a cell at a time instead of jumping a whole one.
+var eighths = []string{"", "▏", "▎", "▍", "▌", "▋", "▊", "▉"}
+
+// renderProgressBar draws a gradient bar with sub-cell precision.
 func renderProgressBar(pct float64, width int) string {
 	if width < 10 {
 		width = 40
 	}
-	filled := int(pct * float64(width))
-	if filled > width {
-		filled = width
+	if pct < 0 {
+		pct = 0
 	}
-	empty := width - filled
+	if pct > 1 {
+		pct = 1
+	}
 
-	bar := progressBarFull.Render(strings.Repeat("█", filled))
-	bar += progressBarEmpty.Render(strings.Repeat("░", empty))
-	return bar
+	startHex, endHex := gradientStops()
+	start, _ := colorful.Hex(startHex)
+	end, _ := colorful.Hex(endHex)
+
+	shade := func(i int) lipgloss.Style {
+		t := 0.0
+		if width > 1 {
+			t = float64(i) / float64(width-1)
+		}
+		return lipgloss.NewStyle().Foreground(lipgloss.Color(start.BlendLuv(end, t).Hex()))
+	}
+
+	exact := pct * float64(width)
+	full := int(exact)
+	if full > width {
+		full = width
+	}
+	frac := exact - float64(full)
+
+	var b strings.Builder
+	for i := 0; i < full; i++ {
+		b.WriteString(shade(i).Render("█"))
+	}
+
+	rest := width - full
+	if rest > 0 {
+		if idx := int(frac * 8); idx > 0 {
+			b.WriteString(shade(full).Render(eighths[idx]))
+			rest--
+		}
+		if rest > 0 {
+			b.WriteString(progressBarEmpty.Render(strings.Repeat("░", rest)))
+		}
+	}
+	return b.String()
 }
+
+// ── text helpers ────────────────────────────────────────────────────────────
 
 func smartTruncateMiddle(s string, width int) string {
 	if width <= 0 {
@@ -193,116 +334,6 @@ func padLineRight(s string, width int) string {
 	return s + strings.Repeat(" ", pad)
 }
 
-func manualBoxContentWidth(outerWidth int) int {
-	if outerWidth < 8 {
-		outerWidth = 8
-	}
-	innerWidth := outerWidth - 2
-	padX := 2
-	scrollbarWidth := 2
-	contentWidth := innerWidth - (padX * 2) - scrollbarWidth
-	if contentWidth < 1 {
-		contentWidth = 1
-	}
-	return contentWidth
-}
-
-func clampScroll(totalLines, visibleLines, scroll int) int {
-	maxScroll := totalLines - visibleLines
-	if maxScroll < 0 {
-		maxScroll = 0
-	}
-	if scroll < 0 {
-		return maxScroll
-	}
-	if scroll > maxScroll {
-		return maxScroll
-	}
-	return scroll
-}
-
-func sliceLinesForScroll(lines []string, visibleLines, scroll int) ([]string, int, int) {
-	if visibleLines < 1 {
-		visibleLines = 1
-	}
-	total := len(lines)
-	if total == 0 {
-		return []string{""}, 0, 1
-	}
-	scroll = clampScroll(total, visibleLines, scroll)
-	end := scroll + visibleLines
-	if end > total {
-		end = total
-	}
-	return lines[scroll:end], scroll, total
-}
-
-func scrollbarColumn(row, visibleLines, totalLines, scroll int) string {
-	if visibleLines <= 0 {
-		return " "
-	}
-	if totalLines <= visibleLines {
-		return " "
-	}
-	thumbSize := (visibleLines * visibleLines) / totalLines
-	if thumbSize < 1 {
-		thumbSize = 1
-	}
-	if thumbSize > visibleLines {
-		thumbSize = visibleLines
-	}
-	trackRange := visibleLines - thumbSize
-	thumbStart := 0
-	maxScroll := totalLines - visibleLines
-	if trackRange > 0 && maxScroll > 0 {
-		thumbStart = (scroll * trackRange) / maxScroll
-	}
-	if row >= thumbStart && row < thumbStart+thumbSize {
-		return accentCyan.Render("█")
-	}
-	return dimStyle.Render("│")
-}
-
-func renderManualBox(lines []string, outerWidth int, borderStyle lipgloss.Style, visibleLines int, scroll int) string {
-	if outerWidth < 8 {
-		outerWidth = 8
-	}
-	innerWidth := outerWidth - 2
-	padX := 2
-	contentWidth := manualBoxContentWidth(outerWidth)
-
-	lines = hardWrapLines(lines, contentWidth)
-	if len(lines) == 0 {
-		lines = []string{""}
-	}
-	visible, scroll, total := sliceLinesForScroll(lines, visibleLines, scroll)
-
-	horizontal := strings.Repeat("─", innerWidth)
-	top := borderStyle.Render("╭" + horizontal + "╮")
-	bottom := borderStyle.Render("╰" + horizontal + "╯")
-	empty := borderStyle.Render("│") + strings.Repeat(" ", innerWidth) + borderStyle.Render("│")
-
-	var b strings.Builder
-	b.WriteString(top)
-	b.WriteString("\n")
-	b.WriteString(empty)
-	b.WriteString("\n")
-	for i, line := range visible {
-		content := strings.Repeat(" ", padX) + padLineRight(line, contentWidth) + strings.Repeat(" ", padX) + scrollbarColumn(i, len(visible), total, scroll) + " "
-		b.WriteString(borderStyle.Render("│"))
-		b.WriteString(content)
-		b.WriteString(borderStyle.Render("│"))
-		if i < len(visible)-1 {
-			b.WriteString("\n")
-		}
-	}
-	b.WriteString("\n")
-	b.WriteString(empty)
-	b.WriteString("\n")
-	b.WriteString(bottom)
-	return b.String()
-}
-
 func formatBytes(b int64) string {
 	const unit = 1024
 	if b < unit {
@@ -327,173 +358,443 @@ func formatDuration(d time.Duration) string {
 	return fmt.Sprintf("%dm%02ds", s/60, s%60)
 }
 
-// ── menu header line count (for mouse offset) ──────────────────────────────
+// ── scrollable pane ─────────────────────────────────────────────────────────
+//
+// The viewport owns scrolling and wrapping; this only draws the frame and the
+// scrollbar gutter around whatever it hands back.
 
-func (m model) menuHeaderLines() int {
-	menu := m.currentMenu()
-	lines := 1 // leading \n
-	// headerBox: border-top + content + border-bottom = 3 lines
-	lines += 3
-	// headerBox MarginBottom(1)
-	lines += 1
-	// extra \n after headerBox
-	lines += 1
-	// breadcrumb (only on sub-menus)
-	if bc := m.breadcrumb(); bc != "" {
-		lines++
+// paneContentWidth is the usable text width inside a pane of the given outer
+// width: two borders, two pad columns, a gap and the scrollbar column.
+func paneContentWidth(outerWidth int) int {
+	w := outerWidth - 6
+	if w < 10 {
+		w = 10
 	}
-	// subtitle
-	if menu.subtitle != "" {
-		lines++
+	return w
+}
+
+func scrollbarCell(row, height, total, offset int) string {
+	if height <= 0 || total <= height {
+		return " "
 	}
-	// blank line before items
-	lines++
-	return lines
+	thumbStart, thumbSize := thumbMetrics(total, height, offset)
+	if row >= thumbStart && row < thumbStart+thumbSize {
+		return accentCyan.Render("█")
+	}
+	return dimStyle.Render("│")
+}
+
+func renderPane(vp viewport.Model, outerWidth int, borderStyle lipgloss.Style) string {
+	inner := outerWidth - 2
+	if inner < 4 {
+		inner = 4
+	}
+
+	lines := strings.Split(vp.View(), "\n")
+	total := vp.TotalLineCount()
+
+	rule := strings.Repeat("─", inner)
+	var b strings.Builder
+	b.WriteString(borderStyle.Render("╭" + rule + "╮"))
+	b.WriteString("\n")
+	for i, line := range lines {
+		row := " " + padLineRight(line, vp.Width) + " " +
+			scrollbarCell(i, vp.Height, total, vp.YOffset) + " "
+		b.WriteString(borderStyle.Render("│"))
+		b.WriteString(padLineRight(row, inner))
+		b.WriteString(borderStyle.Render("│"))
+		b.WriteString("\n")
+	}
+	b.WriteString(borderStyle.Render("╰" + rule + "╯"))
+	return b.String()
 }
 
 // ── view: menu ──────────────────────────────────────────────────────────────
 
+// menuPaneWidths splits the body into a list column and a detail column. The
+// detail column is dropped on narrow terminals and on menus without
+// descriptions.
+func (m model) menuPaneWidths(menu menuDef) (listW, detailW int) {
+	w := m.contentWidth()
+	if w < 78 || !menuHasDesc(menu) {
+		return w, 0
+	}
+	detailW = w * 2 / 5
+	if detailW > 46 {
+		detailW = 46
+	}
+	if detailW < 30 {
+		detailW = 30
+	}
+	return w - detailW - 2, detailW
+}
+
+func menuHasDesc(menu menuDef) bool {
+	for _, it := range menu.items {
+		if it.desc != "" {
+			return true
+		}
+	}
+	return false
+}
+
+// menuListTop is the screen row of the first visible menu item, used by the
+// mouse handler. The list starts one blank row into the body.
+func (m model) menuListTop() int {
+	return m.bodyTop() + 1
+}
+
+// menuWindow is the slice of items that fits the body, scrolled to keep the
+// cursor visible. Long menus would otherwise be clipped without a trace.
+func (m model) menuWindow(n int) (start, count int) {
+	fit := m.bodyHeight() - 2
+	if fit < 1 {
+		fit = 1
+	}
+	if fit >= n {
+		return 0, n
+	}
+	start = m.cursor - fit/2
+	if start < 0 {
+		start = 0
+	}
+	if start+fit > n {
+		start = n - fit
+	}
+	return start, fit
+}
+
 func (m model) viewMenu() string {
 	menu := m.currentMenu()
+	listW, detailW := m.menuPaneWidths(menu)
+
+	list := "\n" + m.renderMenuList(menu, listW, detailW > 0)
+	if detailW == 0 {
+		return list
+	}
+
+	detail := "\n" + m.renderMenuDetail(menu, detailW, m.bodyHeight()-1)
+	return lipgloss.JoinHorizontal(
+		lipgloss.Top,
+		lipgloss.NewStyle().Width(listW).MaxWidth(listW).Render(list),
+		lipgloss.NewStyle().Width(2).Render(""),
+		detail,
+	)
+}
+
+func (m model) renderMenuList(menu menuDef, width int, twoPane bool) string {
+	start, count := m.menuWindow(len(menu.items))
+
 	var b strings.Builder
+	for i := start; i < start+count; i++ {
+		item := menu.items[i]
+		icon := item.icon
+		labelW := width - 4 - lipgloss.Width(icon)
 
-	b.WriteString("\n")
-
-	title := titleStyle.Render(menu.title)
-	b.WriteString(headerBox.Render(title))
-	b.WriteString("\n")
-
-	bc := m.breadcrumb()
-	if bc != "" {
-		b.WriteString(bc)
-	}
-
-	if menu.subtitle != "" {
-		b.WriteString("  " + subtitleStyle.Render(menu.subtitle) + "\n")
-	}
-	b.WriteString("\n")
-
-	menuWidth := m.width - 6
-	if menuWidth < 20 {
-		menuWidth = 20
-	}
-
-	for i, item := range menu.items {
+		var row string
 		if i == m.cursor {
-			label := smartTruncateMiddle(item.label, menuWidth-6)
-			sel := fmt.Sprintf(" %s %s ", item.icon, label)
-			b.WriteString(itemSelected.Render(sel))
-			if item.desc != "" {
-				descWidth := menuWidth - lipgloss.Width(sel) - 4
-				if descWidth < 12 {
-					descWidth = 12
+			bar := lipgloss.NewStyle().
+				Foreground(item.color.GetForeground()).
+				Background(colorHighlight).
+				Render("▌")
+			iconSeg := lipgloss.NewStyle().
+				Foreground(item.color.GetForeground()).
+				Background(colorHighlight).
+				Render(icon)
+			row = bar + rowBG.Render(" ") + iconSeg +
+				rowSelLabel.Render(" "+smartTruncateMiddle(item.label, labelW))
+			if !twoPane && item.desc != "" {
+				if space := width - lipgloss.Width(row) - 4; space > 14 {
+					row += rowSelDesc.Render("  " + smartTruncateMiddle(item.desc, space))
 				}
-				b.WriteString("  " + dimStyle.Render(smartTruncateMiddle(item.desc, descWidth)))
 			}
+			row = padBG(row, width, rowBG)
 		} else {
-			icon := item.color.Render(item.icon)
-			label := item.color.Render(smartTruncateMiddle(item.label, menuWidth-6))
-			b.WriteString(fmt.Sprintf("   %s %s", icon, label))
+			row = "  " + item.color.Render(icon) + " " +
+				itemNormal.Render(smartTruncateMiddle(item.label, labelW))
 		}
+		b.WriteString(row)
 		b.WriteString("\n")
 	}
 
-	b.WriteString("\n")
-	b.WriteString(menuKeybar())
-	b.WriteString("\n")
+	if count < len(menu.items) {
+		b.WriteString(dimStyle.Render(fmt.Sprintf("  %d of %d",
+			m.cursor+1, len(menu.items))))
+	}
+	return b.String()
+}
 
-	if m.status != "" {
-		b.WriteString("\n  " + accentYellow.Render(m.status) + "\n")
+// renderMenuDetail draws the right-hand pane: what the highlighted entry does
+// and, when it maps to a command, the arguments it will ask for.
+func (m model) renderMenuDetail(menu menuDef, width, height int) string {
+	if m.cursor < 0 || m.cursor >= len(menu.items) {
+		return ""
+	}
+	item := menu.items[m.cursor]
+
+	cw := width - 4
+	if cw < 8 {
+		cw = 8
+	}
+	blank := paneBG.Render(strings.Repeat(" ", cw))
+
+	var lines []string
+	addWrapped := func(text string, style lipgloss.Style, indent string) {
+		if text == "" {
+			return
+		}
+		w := cw - lipgloss.Width(indent)
+		if w < 4 {
+			w = 4
+		}
+		for i, l := range strings.Split(style.Width(w).Render(text), "\n") {
+			prefix := indent
+			if i > 0 {
+				prefix = strings.Repeat(" ", lipgloss.Width(indent))
+			}
+			lines = append(lines, padBG(paneBG.Render(prefix)+l, cw, paneBG))
+		}
 	}
 
+	addWrapped(strings.TrimSpace(item.label), paneTitle, "")
+	lines = append(lines, blank)
+	addWrapped(item.desc, paneDim, "")
+
+	if path := menuPathForState(m.state); path != "" {
+		if form := getFormForCommand(path, m.cursor); form != nil {
+			lines = append(lines, blank)
+			addWrapped("UAssetTool "+form.command, paneLabel, "")
+			lines = append(lines, blank)
+			for _, f := range form.fields {
+				label := f.label
+				if f.optional {
+					label += " (optional)"
+				}
+				addWrapped(label, paneDim, paneText.Render("• "))
+			}
+		}
+	}
+
+	// Hug the content: a card stretched to the full body height is mostly
+	// empty space.
+	if h := len(lines) + 2; h < height {
+		height = h
+	}
+	return renderCard(lines, width, height, paneBorder)
+}
+
+// renderCard frames pre-styled, card-background lines so the fill runs edge to
+// edge instead of stopping where the text does.
+func renderCard(lines []string, width, height int, borderStyle lipgloss.Style) string {
+	inner := width - 2
+	if inner < 2 {
+		inner = 2
+	}
+	rows := height - 2
+	if rows < 1 {
+		rows = 1
+	}
+
+	rule := strings.Repeat("─", inner)
+	var b strings.Builder
+	b.WriteString(borderStyle.Render("╭" + rule + "╮"))
+	b.WriteString("\n")
+	for i := 0; i < rows; i++ {
+		content := ""
+		if i < len(lines) {
+			content = lines[i]
+		}
+		row := paneBG.Render(" ") + padBG(content, inner-1, paneBG)
+		b.WriteString(borderStyle.Render("│"))
+		b.WriteString(row)
+		b.WriteString(borderStyle.Render("│"))
+		b.WriteString("\n")
+	}
+	b.WriteString(borderStyle.Render("╰" + rule + "╯"))
 	return b.String()
+}
+
+func menuPathForState(s viewState) string {
+	switch s {
+	case viewAssetOps:
+		return "asset"
+	case viewZen:
+		return "zen"
+	case viewPak:
+		return "pak"
+	case viewJson:
+		return "json"
+	case viewNiagara:
+		return "niagara"
+	}
+	return ""
 }
 
 // ── view: form ──────────────────────────────────────────────────────────────
 
+const formRowsPerField = 4 // top border, input, bottom border, gap
+
+// formWindow is the slice of fields that fits the body, scrolled to keep the
+// focused field visible.
+func (m model) formWindow() (start, count int) {
+	n := len(m.formInputs)
+	fit := (m.bodyHeight() - 2) / formRowsPerField
+	if fit < 1 {
+		fit = 1
+	}
+	if fit >= n {
+		return 0, n
+	}
+	start = m.formCursor - fit/2
+	if start < 0 {
+		start = 0
+	}
+	if start+fit > n {
+		start = n - fit
+	}
+	return start, fit
+}
+
 func (m model) viewForm() string {
+	if m.form == nil {
+		return ""
+	}
+	w := m.contentWidth()
+	start, count := m.formWindow()
+
 	var b strings.Builder
-
 	b.WriteString("\n")
-	title := accentGreen.Bold(true).Render("▶ " + m.form.command)
-	b.WriteString(headerBox.Render(title))
-	b.WriteString("\n")
-
-	for i, f := range m.form.fields {
+	for i := start; i < start+count && i < len(m.formInputs); i++ {
+		f := m.form.fields[i]
 		label := f.label
-		optTag := ""
-		if f.optional {
-			optTag = " " + dimStyle.Render("(optional)")
-		}
 		if f.boolToggle {
 			label += " [Y/N]"
 		}
-
-		if i == m.formCursor {
-			b.WriteString(accentCyan.Render("  ▸ ") + accentCyan.Bold(true).Render(label) + optTag)
-		} else {
-			b.WriteString(dimStyle.Render("    "+label) + optTag)
+		if f.optional {
+			label += " (optional)"
 		}
+		b.WriteString(renderField(label, m.formInputs[i].View(), w, i == m.formCursor))
 		b.WriteString("\n")
-		b.WriteString("    " + m.formInputs[i].View())
-		b.WriteString("\n\n")
 	}
 
-	b.WriteString(formKeybar())
-	b.WriteString("\n")
-
-	if m.status != "" {
-		b.WriteString("\n  " + accentRed.Render("⚠ "+m.status) + "\n")
+	if count < len(m.formInputs) {
+		b.WriteString(dimStyle.Render(fmt.Sprintf("  field %d of %d",
+			m.formCursor+1, len(m.formInputs))))
 	}
-
 	return b.String()
+}
+
+// renderField draws one input in a rounded box with its label inlaid in the
+// top border, so the focused field is obvious without costing an extra row.
+func renderField(label, content string, width int, focused bool) string {
+	boxStyle, labelStyle := fieldBlurred, fieldLabelBlurred
+	if focused {
+		boxStyle, labelStyle = fieldFocused, fieldLabelFocused
+	}
+	border := lipgloss.NewStyle().Foreground(boxStyle.GetBorderTopForeground())
+
+	inner := width - 2
+	if inner < 6 {
+		inner = 6
+	}
+	tag := " " + label + " "
+	if lipgloss.Width(tag) > inner-2 {
+		tag = " " + smartTruncateMiddle(label, inner-4) + " "
+	}
+	dashes := inner - 1 - lipgloss.Width(tag)
+	if dashes < 0 {
+		dashes = 0
+	}
+
+	var b strings.Builder
+	b.WriteString(border.Render("╭─") + labelStyle.Render(tag) +
+		border.Render(strings.Repeat("─", dashes)+"╮"))
+	b.WriteString("\n")
+	b.WriteString(border.Render("│") + " " + padLineRight(content, inner-2) + " " +
+		border.Render("│"))
+	b.WriteString("\n")
+	b.WriteString(border.Render("╰" + strings.Repeat("─", inner) + "╯"))
+	b.WriteString("\n")
+	return b.String()
+}
+
+// fieldInputWidth is the value width a textinput gets inside renderField.
+func fieldInputWidth(outerWidth int) int {
+	w := outerWidth - 8
+	if w < 10 {
+		w = 10
+	}
+	return w
 }
 
 // ── view: preview ───────────────────────────────────────────────────────────
 
+// previewButtons are the labels on the preview confirm row; the mouse
+// handler needs their rendered widths to hit-test.
+var previewButtons = [2]string{"Run", "Cancel"}
+
+// previewButtonHit maps a click on the confirm row to a button index, or -1.
+func (m model) previewButtonHit(x, y int) int {
+	// body rows: blank, title, blank, three card rows, blank, buttons
+	if y != m.bodyTop()+7 {
+		return -1
+	}
+	col := m.contentLeft() + 2
+	for i, label := range previewButtons {
+		w := lipgloss.Width(itemSelected.Render(label))
+		if x >= col && x < col+w {
+			return i
+		}
+		col += w + 3
+	}
+	return -1
+}
+
 func (m model) viewPreview() string {
+	w := m.contentWidth()
 	var b strings.Builder
 
 	b.WriteString("\n")
-	title := accentYellow.Bold(true).Render("👁 Command Preview")
-	b.WriteString(headerBox.Render(title))
-	b.WriteString("\n")
-
-	cmdLine := fmt.Sprintf("UAssetTool.exe %s", m.previewCommand)
-	cardStyle := cardBox
-	innerWidth := 0
-	if m.width > 12 {
-		cardWidth := m.width - 4
-		if cardWidth > 100 {
-			cardWidth = 100
-		}
-		cardStyle = cardStyle.Width(cardWidth).MaxWidth(cardWidth)
-		innerWidth = cardWidth - cardStyle.GetHorizontalFrameSize()
-	}
-	prompt := dimStyle.Render("$") + " "
-	availableWidth := innerWidth - lipgloss.Width(prompt) - 1
-	if availableWidth <= 0 {
-		availableWidth = 20
-	}
-	previewLine := prompt + previewCmdStyle.Render(smartTruncateMiddle(cmdLine, availableWidth))
-	b.WriteString(cardStyle.Render(previewLine))
+	b.WriteString(accentYellow.Bold(true).Render("Command Preview"))
 	b.WriteString("\n\n")
 
-	b.WriteString("  " + keyHint("Y/enter", "run command") + "    " + keyHint("N/esc", "cancel"))
+	card := cardBox.Width(w-cardBox.GetHorizontalBorderSize()).MaxWidth(w).Padding(0, 2)
+	inner := w - card.GetHorizontalFrameSize()
+	prompt := dimStyle.Render("$") + " "
+	avail := inner - lipgloss.Width(prompt)
+	if avail < 10 {
+		avail = 10
+	}
+	cmdLine := "UAssetTool.exe " + m.previewCommand
+	b.WriteString(card.Render(prompt + previewCmdStyle.Render(smartTruncateMiddle(cmdLine, avail))))
+	b.WriteString("\n\n")
+	b.WriteString(renderChoice(previewButtons[0], previewButtons[1], m.previewCursor))
 	b.WriteString("\n")
 
 	return b.String()
 }
 
+// renderChoice draws a two-button row with the active one filled.
+func renderChoice(a, c string, cursor int) string {
+	btn := func(s string, on bool) string {
+		if on {
+			return itemSelected.Render(s)
+		}
+		return lipgloss.NewStyle().Foreground(colorSubtle).Padding(0, 1).Render(s)
+	}
+	return "  " + btn(a, cursor == 0) + "   " + btn(c, cursor != 0)
+}
+
 func (m model) viewPrompt() string {
+	w := m.contentWidth()
 	var b strings.Builder
 
-	b.WriteString("\n")
-	title := accentYellow.Bold(true).Render("⚠ Update Available")
+	title := "Update Available"
 	if m.prompt != nil && m.prompt.title != "" {
-		title = accentYellow.Bold(true).Render("⚠ " + m.prompt.title)
+		title = m.prompt.title
 	}
-	b.WriteString(headerBox.Render(title))
+	b.WriteString("\n")
+	b.WriteString(accentYellow.Bold(true).Render("⚠  " + title))
 	b.WriteString("\n\n")
 
 	var body strings.Builder
@@ -503,11 +804,11 @@ func (m model) viewPrompt() string {
 			body.WriteString("\n")
 		}
 	}
-	b.WriteString(cardBox.Render(strings.TrimSpace(body.String())))
+	b.WriteString(cardBox.Width(w - cardBox.GetHorizontalBorderSize()).MaxWidth(w).
+		Render(strings.TrimSpace(body.String())))
 	b.WriteString("\n\n")
 
-	confirmLabel := "Confirm"
-	cancelLabel := "Cancel"
+	confirmLabel, cancelLabel := "Confirm", "Cancel"
 	if m.prompt != nil {
 		if m.prompt.confirm != "" {
 			confirmLabel = m.prompt.confirm
@@ -516,18 +817,7 @@ func (m model) viewPrompt() string {
 			cancelLabel = m.prompt.cancel
 		}
 	}
-	confirm := "[ " + confirmLabel + " ]"
-	cancel := "[ " + cancelLabel + " ]"
-	if m.promptCursor == 0 {
-		confirm = itemSelected.Render(confirm)
-		cancel = dimStyle.Render(cancel)
-	} else {
-		confirm = dimStyle.Render(confirm)
-		cancel = itemSelected.Render(cancel)
-	}
-	b.WriteString("  " + confirm + "    " + cancel)
-	b.WriteString("\n\n")
-	b.WriteString("  " + keyHint("←→/tab", "choose") + "    " + keyHint("Y/enter", "confirm") + "    " + keyHint("N/esc", "skip"))
+	b.WriteString(renderChoice(confirmLabel, cancelLabel, m.promptCursor))
 	b.WriteString("\n")
 
 	return b.String()
@@ -536,48 +826,16 @@ func (m model) viewPrompt() string {
 // ── view: running ───────────────────────────────────────────────────────────
 
 func (m model) viewRunning() string {
+	w := m.contentWidth()
 	var b strings.Builder
 
-	b.WriteString("\n")
-	b.WriteString(headerBox.Render(accentCyan.Bold(true).Render("▶ Running Command")))
+	label := accentCyan.Render("Executing UAssetTool…")
+	if !m.logFollow {
+		label += dimStyle.Render("   scrolled back — press end to follow")
+	}
+	b.WriteString(m.spin.View() + "  " + label)
 	b.WriteString("\n\n")
-
-	b.WriteString("  " + m.spinner() + "  " + accentCyan.Render("Executing UAssetTool..."))
-	b.WriteString("\n\n")
-
-	logText := normalizeBoxText(strings.TrimRight(m.runningOutput, "\n"))
-	logLines := strings.Split(logText, "\n")
-	if strings.TrimSpace(m.runningOutput) == "" {
-		logLines = []string{dimStyle.Render("Waiting for UAssetTool output...")}
-	}
-
-	maxLines := m.height - 12
-	if maxLines < 6 {
-		maxLines = 6
-	}
-
-	logWidth := m.width - 6
-	logWidth -= 2
-	if logWidth < 30 {
-		logWidth = 30
-	}
-	if logWidth > 120 {
-		logWidth = 120
-	}
-
-	contentWidth := manualBoxContentWidth(logWidth)
-
-	for i, line := range logLines {
-		logLines[i] = smartTruncateMiddle(line, contentWidth)
-	}
-	b.WriteString(renderManualBox(logLines, logWidth, lipgloss.NewStyle().Foreground(lipgloss.Color(colorBorder)), maxLines, m.runningScroll))
-	b.WriteString("\n")
-	b.WriteString("  " + dimStyle.Render("Live debug log from UAT  •  ↑↓ scroll  PgUp/PgDn jump  Home/End  •  Ctrl+C copy  •  Ctrl+X stop"))
-	b.WriteString("\n")
-	if m.status != "" {
-		b.WriteString("  " + accentRed.Render(m.status))
-	}
-	b.WriteString("\n")
+	b.WriteString(renderPane(m.logVP, w, lipgloss.NewStyle().Foreground(colorBorder)))
 
 	return b.String()
 }
@@ -589,54 +847,47 @@ func (m model) viewDownload() string {
 	p := m.dlProgress
 
 	b.WriteString("\n")
-	b.WriteString(headerBox.Render(accentBlue.Bold(true).Render("⬇ Download / Update")))
-	b.WriteString("\n")
 
 	if p.phase == "" {
-		b.WriteString("  " + m.spinner() + "  " + accentCyan.Render("Fetching release info..."))
-		b.WriteString("\n")
+		b.WriteString(m.spin.View() + "  " + accentCyan.Render("Fetching release info…"))
 		return b.String()
 	}
 
-	if p.phase == "downloading" {
-		pct := float64(0)
+	barWidth := m.contentWidth() - 4
+	if barWidth > 64 {
+		barWidth = 64
+	}
+	if barWidth < 20 {
+		barWidth = 20
+	}
+
+	switch p.phase {
+	case "downloading":
+		pct := 0.0
 		if p.totalBytes > 0 {
 			pct = float64(p.bytesDownloaded) / float64(p.totalBytes)
 		}
 
-		b.WriteString("  " + m.spinner() + "  " + accentCyan.Render("Downloading UAssetTool..."))
+		b.WriteString(m.spin.View() + "  " + accentCyan.Render("Downloading UAssetTool…"))
+		b.WriteString("\n\n")
+		b.WriteString(renderProgressBar(pct, barWidth))
 		b.WriteString("\n\n")
 
-		barWidth := m.width - 10
-		if barWidth < 20 {
-			barWidth = 40
-		}
-		if barWidth > 60 {
-			barWidth = 60
-		}
-		b.WriteString("  " + renderProgressBar(pct, barWidth))
-		b.WriteString("\n\n")
-
-		stats := fmt.Sprintf("  %s / %s", formatBytes(p.bytesDownloaded), formatBytes(p.totalBytes))
+		stats := fmt.Sprintf("%s / %s", formatBytes(p.bytesDownloaded), formatBytes(p.totalBytes))
 		if p.totalBytes > 0 {
-			stats += fmt.Sprintf("  (%d%%)", int(pct*100))
+			stats += fmt.Sprintf("   %d%%", int(pct*100))
 		}
-		b.WriteString(accentCyan.Render(stats))
-		b.WriteString("\n")
-
-		speedStr := formatBytes(int64(p.speed)) + "/s"
-		etaStr := formatDuration(p.eta)
-		b.WriteString("  " + dimStyle.Render("Speed: ") + accentGreen.Render(speedStr))
-		b.WriteString("    " + dimStyle.Render("ETA: ") + accentYellow.Render(etaStr))
-		b.WriteString("\n")
-
-	} else if p.phase == "extracting" {
-		b.WriteString("  " + m.spinner() + "  " + accentYellow.Render("Extracting UAssetTool.exe..."))
+		b.WriteString(textStyle.Render(stats))
 		b.WriteString("\n\n")
-		b.WriteString("  " + renderProgressBar(1.0, 40))
+		b.WriteString(dimStyle.Render("speed  ") + accentGreen.Render(formatBytes(int64(p.speed))+"/s"))
+		b.WriteString(dimStyle.Render("    eta  ") + accentYellow.Render(formatDuration(p.eta)))
+
+	case "extracting":
+		b.WriteString(m.spin.View() + "  " + accentYellow.Render("Extracting UAssetTool.exe…"))
 		b.WriteString("\n\n")
-		b.WriteString("  " + accentGreen.Render(formatBytes(p.bytesDownloaded)) + dimStyle.Render(" downloaded"))
-		b.WriteString("\n")
+		b.WriteString(renderProgressBar(1.0, barWidth))
+		b.WriteString("\n\n")
+		b.WriteString(accentGreen.Render(formatBytes(p.bytesDownloaded)) + dimStyle.Render(" downloaded"))
 	}
 
 	return b.String()
@@ -645,87 +896,47 @@ func (m model) viewDownload() string {
 // ── view: output ────────────────────────────────────────────────────────────
 
 func (m model) viewOutput() string {
-	var b strings.Builder
-
-	b.WriteString("\n")
-
-	icon := "✓"
-	hdrStyle := accentGreen
+	w := m.contentWidth()
+	border := lipgloss.NewStyle().Foreground(colorGreen)
 	if m.outputErr {
-		icon = "✗"
-		hdrStyle = accentRed
+		border = lipgloss.NewStyle().Foreground(colorRed)
 	}
+	return "\n" + renderPane(m.outVP, w, border)
+}
 
-	b.WriteString(headerBox.Render(hdrStyle.Bold(true).Render(fmt.Sprintf("%s Result", icon))))
-	b.WriteString("\n")
+// releaseHeaderLines renders download release metadata into the same scroll
+// pane as the output, so the pane height no longer depends on it.
+func (m model) releaseHeaderLines(width int) []string {
+	if m.dlInfo == nil || m.outputErr {
+		return nil
+	}
+	out := []string{
+		accentCyan.Bold(true).Render("Release  ") + accentGreen.Render(m.dlInfo.TagName),
+	}
+	if m.dlInfo.Name != "" && m.dlInfo.Name != m.dlInfo.TagName {
+		out[0] += dimStyle.Render("  " + m.dlInfo.Name)
+	}
+	out = append(out, dimStyle.Render("Published  ")+
+		accentYellow.Render(m.dlInfo.PublishedAt.Format("Jan 02, 2006 15:04")))
 
-	if m.dlInfo != nil && !m.outputErr {
-		var info strings.Builder
-		info.WriteString(accentCyan.Bold(true).Render("Release: ") + accentGreen.Render(m.dlInfo.TagName))
-		if m.dlInfo.Name != "" && m.dlInfo.Name != m.dlInfo.TagName {
-			info.WriteString("  " + dimStyle.Render(m.dlInfo.Name))
+	if m.dlInfo.Body != "" {
+		out = append(out, "", dimStyle.Render("Release notes"))
+		notes := strings.Split(normalizeBoxText(m.dlInfo.Body), "\n")
+		for _, line := range hardWrapLines(notes, width-2) {
+			out = append(out, "  "+line)
 		}
-		info.WriteString("\n")
-		info.WriteString(dimStyle.Render("Published: ") + accentYellow.Render(m.dlInfo.PublishedAt.Format("Jan 02, 2006 15:04")))
-		info.WriteString("\n")
-		if m.dlInfo.Body != "" {
-			body := m.dlInfo.Body
-			bodyLines := strings.Split(body, "\n")
-			maxBodyLines := 12
-			if len(bodyLines) > maxBodyLines {
-				bodyLines = bodyLines[:maxBodyLines]
-				bodyLines = append(bodyLines, dimStyle.Render(fmt.Sprintf("  ... (%d more lines)", len(strings.Split(body, "\n"))-maxBodyLines)))
-			}
-			info.WriteString("\n" + dimStyle.Render("Release Notes:") + "\n")
-			for _, line := range bodyLines {
-				info.WriteString("  " + line + "\n")
-			}
-		}
-		b.WriteString(cardBox.Render(info.String()))
-		b.WriteString("\n")
 	}
-
-	out := normalizeBoxText(m.output)
-	lines := strings.Split(out, "\n")
-	maxLines := m.height - 14
-	if maxLines < 8 {
-		maxLines = 8
-	}
-	boxWidth := m.width - 6
-	if boxWidth < 30 {
-		boxWidth = 30
-	}
-	if boxWidth > 140 {
-		boxWidth = 140
-	}
-	contentWidth := manualBoxContentWidth(boxWidth)
-	lines = hardWrapLines(lines, contentWidth)
-	borderStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(colorGreen))
-	if m.outputErr {
-		borderStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(colorRed))
-	}
-	b.WriteString(renderManualBox(lines, boxWidth, borderStyle, maxLines, m.outputScroll))
-	b.WriteString("\n\n")
-
-	b.WriteString("  " + keyHint("↑↓/PgUp/PgDn/Home/End", "scroll") + "    " + keyHint("Ctrl+C", "copy") + "    " + keyHint("backspace/esc", "back to menu"))
-	b.WriteString("\n")
-
-	return b.String()
+	return append(out, "", footerRule.Render(strings.Repeat("─", width)), "")
 }
 
 // ── view: setting input ─────────────────────────────────────────────────────
 
 func (m model) viewSettingInput() string {
+	w := m.contentWidth()
 	var b strings.Builder
-
 	b.WriteString("\n")
-	title := accentYellow.Bold(true).Render("✏ " + m.settingLabel)
-	b.WriteString(headerBox.Render(title))
-	b.WriteString("\n\n")
-	b.WriteString("  " + m.settingInput.View())
-	b.WriteString("\n\n")
-	b.WriteString("  " + keyHint("enter", "save") + "    " + keyHint("esc", "cancel"))
+	b.WriteString(renderField(m.settingLabel, m.settingInput.View(), w, true))
 	b.WriteString("\n")
-
+	b.WriteString(dimStyle.Render("  Leave blank to clear this setting."))
 	return b.String()
 }

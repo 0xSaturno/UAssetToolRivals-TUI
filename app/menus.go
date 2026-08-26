@@ -40,29 +40,29 @@ func mainMenuDef(version, versionNote string) menuDef {
 		title:    title,
 		subtitle: sub,
 		items: []menuItem{
-			{"Run Command", "▶", accentGreen, "Execute UAssetTool CLI commands"},
-			{"Download / Update", "⬇", accentBlue, "Fetch latest release from GitHub"},
-			{"Settings", "⚙", accentYellow, "Configure paths and preferences"},
-			{"Exit", "✕", dimStyle, ""},
+			{"Run Command", "▸", accentGreen, "Execute UAssetTool CLI commands"},
+			{"Download / Update", "↓", accentBlue, "Fetch latest release from GitHub"},
+			{"Settings", "≡", accentYellow, "Configure paths and preferences"},
+			{"Exit", "×", dimStyle, ""},
 		},
 	}
 }
 
 var categoryMenu = menuDef{
-	title:    "📂 Command Category",
+	title:    "Command Category",
 	subtitle: "Choose an operation type",
 	items: []menuItem{
-		{"Asset Operations", "🔍", accentGreen, "Detect, inspect, repair, and edit asset files"},
-		{"Zen / IoStore", "📦", accentBlue, "Convert, extract, build, and inspect IoStore data"},
-		{"PAK Operations", "🗃", accentYellow, "Create, extract, and package PAK archives"},
-		{"JSON Conversion", "🔄", accentGreen, "Convert assets to and from editable JSON"},
-		{"Niagara / Other", "✨", accentMagenta, "Inspect Niagara data and run batch utilities"},
-		{"← Back", " ", dimStyle, ""},
+		{"Asset Operations", "◈", accentGreen, "Detect, inspect, repair, and edit asset files"},
+		{"Zen / IoStore", "▣", accentBlue, "Convert, extract, build, and inspect IoStore data"},
+		{"PAK Operations", "▤", accentYellow, "Create, extract, and package PAK archives"},
+		{"JSON Conversion", "⇄", accentGreen, "Convert assets to and from editable JSON"},
+		{"Niagara / Other", "✦", accentMagenta, "Inspect Niagara data and run batch utilities"},
+		{"Back", "←", dimStyle, ""},
 	},
 }
 
 var assetOpsMenu = menuDef{
-	title:    "🔍 Asset Operations",
+	title:    "Asset Operations",
 	subtitle: "Inspect, fix, and edit UAsset files",
 	items: []menuItem{
 		{"Detect Type", "•", accentCyan, "Identify what kind of asset a file contains"},
@@ -74,12 +74,12 @@ var assetOpsMenu = menuDef{
 		{"Batch Inject Textures", "•", accentCyan, "Inject matching replacement images into Texture2D assets in bulk"},
 		{"Extract Texture", "•", accentCyan, "Extract a Texture2D asset to an image file"},
 		{"Batch Extract Textures", "•", accentCyan, "Extract every Texture2D asset in a folder to images"},
-		{"← Back", " ", dimStyle, ""},
+		{"Back", "←", dimStyle, ""},
 	},
 }
 
 var zenMenu = menuDef{
-	title:    "📦 Zen / IoStore Operations",
+	title:    "Zen / IoStore Operations",
 	subtitle: "IoStore conversion and inspection",
 	items: []menuItem{
 		{"Legacy to Zen", "•", accentBlue, "Convert a legacy asset into Zen format"},
@@ -95,41 +95,41 @@ var zenMenu = menuDef{
 		{"Recompress IoStore", "•", accentBlue, "Recompress an existing IoStore container"},
 		{"Extract ScriptObjects.bin", "•", accentBlue, "Export ScriptObjects.bin from the game Paks folder"},
 		{"CityHash Path/String", "•", accentBlue, "Generate CityHash values for paths or text"},
-		{"← Back", " ", dimStyle, ""},
+		{"Back", "←", dimStyle, ""},
 	},
 }
 
 var pakMenu = menuDef{
-	title:    "🗃 PAK Operations",
+	title:    "PAK Operations",
 	subtitle: "Create and extract PAK archives",
 	items: []menuItem{
 		{"Create PAK", "•", accentYellow, "Package files into a new PAK archive"},
 		{"Create Companion PAK", "•", accentYellow, "Build the companion PAK file used with a mod container"},
 		{"Extract/List PAK", "•", accentYellow, "Extract files from a PAK or list its contents"},
 		{"List PAK Contents", "•", accentYellow, "List a PAK without extracting, optionally paths only"},
-		{"← Back", " ", dimStyle, ""},
+		{"Back", "←", dimStyle, ""},
 	},
 }
 
 var jsonMenu = menuDef{
-	title:    "🔄 JSON Conversion",
+	title:    "JSON Conversion",
 	subtitle: "Convert between UAsset and JSON",
 	items: []menuItem{
 		{"UAsset to JSON", "•", accentGreen, "Convert a binary asset into editable JSON"},
 		{"JSON to UAsset", "•", accentGreen, "Build a binary asset from edited JSON"},
-		{"← Back", " ", dimStyle, ""},
+		{"Back", "←", dimStyle, ""},
 	},
 }
 
 var niagaraMenu = menuDef{
-	title:    "✨ Niagara / Other",
+	title:    "Niagara / Other",
 	subtitle: "Niagara assets and batch utilities",
 	items: []menuItem{
 		{"Niagara Details", "•", accentMagenta, "Inspect Niagara color curves and asset details"},
 		{"Niagara Edit", "•", accentMagenta, "Apply JSON-based edits to selected Niagara exports"},
 		{"Niagara Audit", "•", accentMagenta, "Deep-scan Niagara exports for color-related data"},
 		{"Parse Locres", "•", accentMagenta, "Dump, filter, or search localization .locres entries"},
-		{"← Back", " ", dimStyle, ""},
+		{"Back", "←", dimStyle, ""},
 	},
 }
 
@@ -137,18 +137,27 @@ var niagaraMenu = menuDef{
 
 func settingsMenuDef(cfg Config) menuDef {
 	return menuDef{
-		title:    "⚙ Settings",
+		title:    "Settings",
 		subtitle: "Configure defaults and preferences",
 		items: []menuItem{
-			{fmt.Sprintf("Game Paks Dir  %s", dimVal(cfg.GamePaksDir)), "📁", accentCyan, ""},
-			{fmt.Sprintf("USMAP Path  %s", dimVal(cfg.UsmapPath)), "📄", accentCyan, ""},
-			{fmt.Sprintf("AES Key  %s", dimVal(cfg.AesKey)), "🔑", accentCyan, ""},
-			{fmt.Sprintf("Output Dir  %s", dimVal(cfg.OutputExtractionDir)), "📂", accentCyan, ""},
-			{toggleLabel("Command Preview", cfg.PreviewCommand), "👁", accentYellow, ""},
-			{toggleLabel("Advanced Extract IoStore Args", cfg.EnableAdvancedExtractIoStoreArgs), "🧪", accentYellow, ""},
-			{"← Back", " ", dimStyle, ""},
+			{fmt.Sprintf("Game Paks Dir  %s", dimVal(cfg.GamePaksDir)), "▸", accentCyan, ""},
+			{fmt.Sprintf("USMAP Path  %s", dimVal(cfg.UsmapPath)), "▸", accentCyan, ""},
+			{fmt.Sprintf("AES Key  %s", dimVal(cfg.AesKey)), "▸", accentCyan, ""},
+			{fmt.Sprintf("Output Dir  %s", dimVal(cfg.OutputExtractionDir)), "▸", accentCyan, ""},
+			{toggleLabel("Command Preview", cfg.PreviewCommand), toggleIcon(cfg.PreviewCommand), accentYellow, ""},
+			{toggleLabel("Advanced Extract IoStore Args", cfg.EnableAdvancedExtractIoStoreArgs), toggleIcon(cfg.EnableAdvancedExtractIoStoreArgs), accentYellow, ""},
+			{"Back", "←", dimStyle, ""},
 		},
 	}
+}
+
+// toggleIcon mirrors a toggle's state in the icon column, so it reads at a
+// glance without parsing the ON/OFF suffix.
+func toggleIcon(on bool) string {
+	if on {
+		return "◈"
+	}
+	return "◇"
 }
 
 func toggleLabel(label string, on bool) string {
